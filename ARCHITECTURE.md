@@ -1079,6 +1079,17 @@ flowchart TD
   уменьшенном до 135 px; кадр, для которого долю не удалось посчитать, считается пустым). Если
   ffmpeg не отдал сам кадр контакт-листа, команда останавливается с ошибкой; иначе она только
   предупреждает: qa-отчёт не пишет, код 0.
+- **Финальный QA** (`scripts/qa/final-qa.js`). `build.js` после финиша и музыки, внутри
+  тяжёлого слота и до публикации финала, запускает его отдельным node-процессом
+  (`runFinalQaSync`, флаг `--from-build`): `build.js` синхронный, а раннер асинхронный. Проверки –
+  массив `FINAL_CHECKS` (`{id, run(ctx)}`); сейчас одна `transcript`: повторная расшифровка финала
+  (`transcribeTakeFile`), слова активной расшифровки `manifest.transcript.words`, уровни звука
+  финала (`readTakeLevels`) и гейты F1–F5 из `scripts/qa/final-transcript-gates.js`. Слова
+  расшифровки за концом финала отбрасываются; с музыкой F5 пропускается. Отчёт
+  `qa/final-<UTC-дата-время>.json|txt` (без проекта – `qa/` рядом с финалом); гейты дают только
+  pass/warn/skipped, сбой раннера – строка `final QA не выполнен: …` и `error` отчёта, а дочерний
+  процесс в режиме сборки всегда выходит с кодом 0. `--no-final-qa` выключает вызов; ручной запуск –
+  `automontage qa-final <папка>`.
 - **Отчёты и коды.** `scripts/qa/report.js` строит отчёт (`buildReport`, статус `error` при
   любой ошибке), печатает его (`formatReport`) и пишет атомарно (`writeReport`). `layer check` и
   `layer render` возвращают 0 (пройдено или предупреждения), 1 (стоп) или 2 (оценить нельзя);
@@ -1178,7 +1189,7 @@ Remotion `OffthreadVideo`. `trimBefore = round(trimStartSec × fps)`, а дли�
 | Motion-kit (детали слоя) | `src/motion-kit/*` (чистые `core.js` и React `index.js`), `templates/motion-layer/` (стартовые файлы слоя), `scripts/remotion-webpack.js` (alias `@automontage/motion-kit`) |
 | Kit в Node | `scripts/motion-kit-node.js`: `loadKitCore`, `buildLayerManifest`, граница `plan.js` `findPlanViolation` (esbuild `buildSync` + metafile) |
 | Команды слоя | `scripts/layer/cli.js` и `new`, `words`, `check`, `render`, `import`, `brief`, `stock`, `sheet`; общие части `common.js`, `registry.js`, `sfx-library.js`; машинная очередь `scripts/heavy-queue.js`; `remotionLayerRenderCommand` в `scripts/build-commands.js` |
-| QA-гейты | `scripts/qa/profiles.js`, `report.js`, `safe-rect.js`, `timeline-gates.js` (G1–G5, G9–G11), `audio.js`, `media-gates.js` (G6, G7), `mix-gates.js` (G8), `preview-gates.js` (барьер L + G8), `empty-frame-gate.js` (G12) |
+| QA-гейты | `scripts/qa/profiles.js`, `report.js`, `safe-rect.js`, `timeline-gates.js` (G1–G5, G9–G11), `audio.js`, `media-gates.js` (G6, G7), `mix-gates.js` (G8), `preview-gates.js` (барьер L + G8), `empty-frame-gate.js` (G12), `final-transcript-gates.js` (F1–F5), `final-qa.js` (раннер финала) |
 
 Длинный рендер хранит части в `out/.chunks/<job-sha256>/`. Cache descriptor v2 включает
 composition, канонизированные props, identities source/audio, диапазоны и Remotion options,

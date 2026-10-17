@@ -64,6 +64,9 @@ function help() {
                                       собрать ролик из лучших кусков разных дублей
   automontage clean [--level renders|archive] [--yes]
                                       отчёт, что можно удалить у готовых роликов; --yes удаляет
+  automontage qa-final <папка> [--final <mp4>] [--model <имя>] [--music]
+                                      повторно расшифровать финал: паразиты, дубли, пропавшие слова,
+                                      паузы, вздохи – отчёт qa/final-*.txt (сборка делает это сама)
   automontage --help                  эта справка
 
 Частые опции:
@@ -88,6 +91,7 @@ function help() {
   --autopos             плашки автоматически мимо лица
   --reframe             перекадрировать Dynamic в вертикаль по лицу
   --outdir <путь>       куда положить результат (по умолчанию текущая папка)
+  --no-final-qa         не расшифровывать готовый финал повторно (отчёт qa/final-*.txt)
 
 Внешние темы подключаются по id через каталог THEMES_EXT.
 
@@ -227,6 +231,16 @@ function main(argv = process.argv.slice(2)) {
   if (argv[0] === 'clean') {
     try {
       execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'project', 'clean.js'), ...argv.slice(1)], {
+        stdio: 'inherit', cwd: process.cwd(), shell: false,
+      });
+    } catch (e) { process.exit(e.status || 1); }
+    process.exit(0);
+  }
+
+  // финальный QA: повторная расшифровка готового MP4 и отчёт qa/final-*.txt
+  if (argv[0] === 'qa-final') {
+    try {
+      execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'qa', 'final-qa.js'), ...argv.slice(1)], {
         stdio: 'inherit', cwd: process.cwd(), shell: false,
       });
     } catch (e) { process.exit(e.status || 1); }
