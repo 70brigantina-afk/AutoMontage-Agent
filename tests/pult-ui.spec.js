@@ -7,6 +7,7 @@ const { test, expect } = require('playwright/test');
 
 const { acceptComment, readComments } = require('../scripts/pult/comments');
 const { startPultServer } = require('../scripts/pult/server');
+const { readPultState, setFinalDeclined } = require('../scripts/pult/state');
 const { confirmRoughCut } = require('../scripts/project/rough-cut');
 const { readProjectManifest } = require('../scripts/project/workspace');
 // addSecondRevision публикует второй черновик и preview поверх утверждённого и
@@ -426,6 +427,74 @@ test('an approved card archived afterwards shows the honest archived texts', asy
   await expect(page.locator('.player__label')).toHaveText(
     'Утверждённый preview – в архиве, агент соберёт финал по вашей просьбе',
   );
+});
+
+// «Финал не нужен» (#104, DECISIONS.md D-050): тихая вторичная кнопка с подтверждением у
+// утверждённой версии без финала; после отказа – «Вернуть: собрать финал».
+test('an approved video can be marked «Финал не нужен» after a confirmation and brought back', async ({ page }) => {
+  await restartWith((dir) => {
+    addDraftProject(dir, { folder: 'approved-clip', name: 'Утверждён без финала', approve: true });
+    addDraftProject(dir, { folder: 'ready-clip', name: 'Готовый ролик', approve: true, final: true });
+  });
+  await openCard(page, 'Готовый ролик');
+  await expect(page.getByRole('button', { name: 'Финал не нужен', exact: true })).toHaveCount(0);
+  await page.locator('button', { hasText: '← Все ролики' }).click();
+  await page.locator('.card', { hasText: 'Утверждён без финала' }).click();
+  const decline = page.getByRole('button', { name: 'Финал не нужен', exact: true });
+  await expect(decline).toHaveClass(/secondary/);
+  await decline.click();
+  const confirm = page.locator('[data-final-confirm]');
+  await expect(confirm).toBeVisible();
+  await expect(confirm).toContainText('Агент не будет собирать финал этой версии');
+  await confirm.locator('button', { hasText: 'Отмена' }).click();
+  await expect(confirm).toBeHidden();
+  expect(readPultState(projectsDir).finalDeclined).toEqual([]);
+
+  await decline.click();
+  await page.locator('button', { hasText: 'Да, финал не нужен' }).click();
+  await expect(page.locator('[data-notice]')).toContainText('финал не нужен');
+  await expect(page.locator('[data-variant-next]')).toHaveText('Финал не нужен');
+  await expect(page.locator('[data-variant-status]')).toHaveText('Готов');
+  await expect(page.locator('.player__label')).toHaveText('Утверждённый preview – финал не нужен');
+  await expect(page.locator('button', { hasText: 'Да, финал не нужен' })).toHaveCount(0);
+  expect(readPultState(projectsDir).finalDeclined.map((item) => item.folder)).toEqual(['approved-clip']);
+
+  await page.locator('button', { hasText: 'Вернуть: собрать финал' }).click();
+  await expect(page.locator('[data-variant-next]')).toHaveText('Утверждено – агент собирает финал');
+  await expect(page.locator('.player__label')).toHaveText('Утверждённый preview – агент собирает финал');
+  await expect(page.getByRole('button', { name: 'Финал не нужен', exact: true })).toBeVisible();
+  expect(readPultState(projectsDir).finalDeclined).toEqual([]);
+});
+
+test('«Финал не нужен» on an archived approval keeps the card in the archive tab', async ({ page }) => {
+  await openCard(page, 'Перфекционизм');
+  await page.check('[data-viewed]');
+  await page.locator('button', { hasText: 'Утверждаю' }).click();
+  await expect(page.locator('[data-variant-next]')).toHaveText('Утверждено – агент собирает финал');
+  await page.locator('button', { hasText: 'В архив' }).click();
+  await page.click('[data-tab="archive"]');
+  await page.locator('.card', { hasText: 'Перфекционизм' }).click();
+  await expect(page.locator('[data-variant-next]')).toHaveText('Утверждено, в архиве – агент соберёт финал по вашей просьбе');
+  await page.getByRole('button', { name: 'Финал не нужен', exact: true }).click();
+  await page.locator('button', { hasText: 'Да, финал не нужен' }).click();
+  await expect(page.locator('[data-variant-next]')).toHaveText('Финал не нужен');
+  await expect(page.locator('.player__label')).toHaveText('Утверждённый preview – финал не нужен');
+  await expect(page.locator('[data-tab="archive"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('button', { hasText: '← Все ролики' }).click();
+  await expect(page.locator('[data-section="archive"]')).toContainText('Финал не нужен');
+});
+
+test('a final declined outside the open card swaps the button on the next refresh', async ({ page }) => {
+  await restartWith((dir) => {
+    addDraftProject(dir, { folder: 'approved-clip', name: 'Утверждён без финала', approve: true });
+  });
+  await openCard(page, 'Утверждён без финала');
+  await expect(page.getByRole('button', { name: 'Финал не нужен', exact: true })).toBeVisible();
+  const briefPath = readProjectManifest(path.join(projectsDir, 'approved-clip')).currentBrief;
+  setFinalDeclined(projectsDir, { folder: 'approved-clip', briefPath }, true);
+  await page.evaluate(() => refresh({ keepDetail: true }));
+  await expect(page.locator('button', { hasText: 'Вернуть: собрать финал' })).toBeVisible();
+  await expect(page.locator('[data-variant-next]')).toHaveText('Финал не нужен');
 });
 
 // --- Карточка остаётся в синхроне с агентом ---

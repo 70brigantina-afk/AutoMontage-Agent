@@ -182,22 +182,27 @@ test('two real processes contending for the lease only ever get the lease or PRO
   const workerPath = path.join(path.dirname(workspace.dir), 'lease-contender.js');
   // Каждый процесс сотни раз берёт и сразу отпускает lease. Lease-файл то появляется, то исчезает
   // прямо во время проверки пути: наружу может выйти только конфликт, но не сырой ENOENT.
+  // Оба процесса стартуют цикл по общему сигналу «go» (#105): под нагрузкой второй fork иногда
+  // поднимался, когда первый уже отработал свои 2 с, и конкуренции не случалось вовсе.
   fs.writeFileSync(workerPath, String.raw`
 const { acquireProjectMutationLease } = require(process.argv[2]);
 const projectDir = process.argv[3];
-const counts = { acquired: 0, conflicts: 0 };
-const unexpected = [];
-const end = Date.now() + 2000;
-while (Date.now() < end && unexpected.length === 0) {
-  try {
-    acquireProjectMutationLease(projectDir).release();
-    counts.acquired += 1;
-  } catch (error) {
-    if (error && error.code === 'PROJECT_MANIFEST_CONFLICT') counts.conflicts += 1;
-    else unexpected.push(String(error && (error.code || error.message)));
+process.once('message', () => {
+  const counts = { acquired: 0, conflicts: 0 };
+  const unexpected = [];
+  const end = Date.now() + 2000;
+  while (Date.now() < end && unexpected.length === 0) {
+    try {
+      acquireProjectMutationLease(projectDir).release();
+      counts.acquired += 1;
+    } catch (error) {
+      if (error && error.code === 'PROJECT_MANIFEST_CONFLICT') counts.conflicts += 1;
+      else unexpected.push(String(error && (error.code || error.message)));
+    }
   }
-}
-process.send({ type: 'result', counts, unexpected }, () => process.exit(0));
+  process.send({ type: 'result', counts, unexpected }, () => process.exit(0));
+});
+process.send({ type: 'ready' });
 `);
   const children = [0, 1].map(() => fork(
     workerPath,
@@ -209,7 +214,10 @@ process.send({ type: 'result', counts, unexpected }, () => process.exit(0));
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
     }
   });
-  const results = await Promise.all(children.map((child) => waitForMessage(child, 'result')));
+  await Promise.all(children.map((child) => waitForMessage(child, 'ready')));
+  const pending = children.map((child) => waitForMessage(child, 'result'));
+  for (const child of children) child.send({ type: 'go' });
+  const results = await Promise.all(pending);
   for (const { counts, unexpected } of results) {
     assert.deepEqual(unexpected, [], `неожиданные ошибки lease: ${unexpected.join(', ')}`);
     assert.ok(counts.acquired > 0, 'каждый процесс хоть раз получил lease');

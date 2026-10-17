@@ -371,6 +371,8 @@ function closeCard() {
 // заголовком «Передать агенту» (см. agentHandoffBlock).
 function actionsBlock(card, variant) {
   const box = el('div', 'actions');
+  // По этой подписи фоновое обновление узнаёт, что решение о финале изменилось вне карточки.
+  box.dataset.finalState = finalStateOf(variant);
   box.append(el('h3', '', 'Действия'));
   box.append(button('Показать в папке', () => api('/api/reveal', { method: 'POST', body: { key: variant.key } })));
   if (variant.reviewable) {
@@ -380,6 +382,8 @@ function actionsBlock(card, variant) {
     }));
   }
   box.append(lmActionButton(variant));
+  const finalChoice = finalChoiceBlock(variant);
+  if (finalChoice) box.append(finalChoice);
   box.append(button(card.archived ? 'Вернуть из архива' : 'В архив', async () => {
     await api('/api/archive', { method: 'POST', body: { cardId: card.id, archived: !card.archived } });
     // closeCard() сам чистит уведомление – успех показываем уже после него, иначе человек
@@ -389,6 +393,61 @@ function actionsBlock(card, variant) {
     notify(card.archived ? 'Ролик вернулся из архива.' : 'Ролик убран в архив. Папка не тронута.');
   }));
   return box;
+}
+
+function finalStateOf(variant) {
+  return `${Boolean(variant.finalDeclinable)}|${Boolean(variant.finalDeclined)}|${variant.finalTicket || ''}`;
+}
+
+// «Финал не нужен» (DECISIONS.md D-050): решение пользователя об утверждённой версии без
+// финала. Тихая вторичная кнопка с подтверждением; после отказа – «Вернуть: собрать финал».
+// Пульт хранит решение у себя (projects/.pult), паспорт ролика не меняется.
+async function sendFinalDeclined(variant, declined) {
+  try {
+    await api('/api/final-declined', {
+      method: 'POST',
+      body: { key: variant.key, ticket: variant.finalTicket, declined },
+    });
+  } catch (error) {
+    if (['BRIEF_CHANGED', 'FINAL_NOT_WAITING', 'FINAL_NOT_DECLINED'].includes(error.code)) {
+      // Ролик изменился вне карточки: показываем, что на самом деле теперь на экране.
+      await refresh();
+    }
+    throw error;
+  }
+  await refresh();
+  notify(declined
+    ? 'Отмечено: финал не нужен. Агент не будет его собирать.'
+    : 'Финал снова нужен. Скопируйте фразу для агента – он соберёт финал.');
+}
+
+function finalChoiceBlock(variant) {
+  if (!variant.finalTicket) return null;
+  if (variant.finalDeclined) {
+    return button('Вернуть: собрать финал', () => sendFinalDeclined(variant, false));
+  }
+  if (!variant.finalDeclinable) return null;
+  const wrap = el('div', 'final-choice');
+  const ask = button('Финал не нужен', () => {
+    ask.hidden = true;
+    confirmBox.hidden = false;
+  });
+  const confirmBox = el('div', 'final-choice__confirm');
+  confirmBox.dataset.finalConfirm = '';
+  confirmBox.hidden = true;
+  const cancel = el('button', 'link-button', 'Отмена');
+  cancel.type = 'button';
+  cancel.addEventListener('click', () => {
+    confirmBox.hidden = true;
+    ask.hidden = false;
+  });
+  confirmBox.append(
+    el('p', 'hint', 'Агент не будет собирать финал этой версии. Если утвердите новую версию, финал снова понадобится.'),
+    button('Да, финал не нужен', () => sendFinalDeclined(variant, true)),
+    cancel,
+  );
+  wrap.append(ask, confirmBox);
+  return wrap;
 }
 
 // Ровно то, что нужно скопировать и передать агенту, отдельно от обычных действий с папкой.
@@ -612,6 +671,7 @@ function videoLabelFor(variant) {
     // ситуация, но карточку убрали в архив уже после утверждения: подпись должна честно
     // сказать, что финал ждёт отдельной просьбы, а не то, что агент уже занят им.
     if (variant.video.kind !== 'preview') return VIDEO_LABELS[variant.video.kind];
+    if (variant.finalDeclined) return 'Утверждённый preview – финал не нужен';
     if (variant.archivedNeedsFinal) return 'Утверждённый preview – в архиве, агент соберёт финал по вашей просьбе';
     return variant.needsFinal ? 'Утверждённый preview – агент собирает финал' : VIDEO_LABELS[variant.video.kind];
   }
@@ -990,6 +1050,12 @@ function syncDetail(card) {
     badge.className = `badge badge--${variant.status}`;
   }
   if (next) next.textContent = variant.nextStep;
+  // Решение о финале могли принять вне этой карточки (агент по словам пользователя в чате):
+  // блок действий дешёвый и без ввода – просто заменяем его свежим.
+  const actionsBox = document.querySelector('[data-view="detail"] .actions');
+  if (actionsBox && actionsBox.dataset.finalState !== finalStateOf(variant)) {
+    actionsBox.replaceWith(actionsBlock(card, variant));
+  }
   // Билет нарезки сверяем раньше билета утверждения: ниже – ранние выходы. Видео то же, а
   // билета нет – нарезку подтвердили вне пульта (в чате), блок с кнопкой прячем. Новая нарезка
   // – это новый файл, её уже показала полная перерисовка выше; свежий блок всегда приходит

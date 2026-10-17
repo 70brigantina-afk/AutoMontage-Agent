@@ -21,6 +21,7 @@ const USAGE = `Пульт роликов AutoMontage
   automontage pult --install-shortcut    создать значок (macOS: «Программы», Windows: рабочий стол)
   automontage pult --serve               запустить пульт в этом окне терминала
   automontage inbox                      правки и утверждения из пульта для агента
+  automontage inbox --help               флаги входящих: --accept, --decline-final, --restore-final
 
 Опции:
   --projects-dir <путь>   папка с роликами (по умолчанию projects/ в репозитории;

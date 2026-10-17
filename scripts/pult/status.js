@@ -1,6 +1,8 @@
 const { activeRoughCut } = require('../project/rough-cut-model');
 
 const STATUS_ORDER = Object.freeze({ waiting: 0, working: 1, ready: 2 });
+// Пользователь решил, что финал этой утверждённой версии не нужен (DECISIONS.md D-050).
+const FINAL_DECLINED_NEXT_STEP = 'Финал не нужен';
 
 function pluralEdits(count) {
   const mod10 = count % 10;
@@ -16,6 +18,10 @@ function pluralEdits(count) {
 // черновика (например, b-roll ещё не выбран): ход всё ещё за человеком, но не «утвердите».
 // roughCutExists – файл копии активной черновой нарезки лежит на диске: без него этап для
 // пульта не активен (показывать и подтверждать нечего).
+// finalDeclined – пользователь отказался от финала именно этой утверждённой версии (пульт
+// хранит решение в projects/.pult/state.json по папке и пути brief, см. state.js): такая версия
+// финала не ждёт. Флаг действует только для утверждённого brief без своего финала и без
+// активной нарезки.
 function deriveVariantStatus({
   manifest,
   currentBriefStatus,
@@ -24,6 +30,7 @@ function deriveVariantStatus({
   pendingComments = 0,
   approvalBlocker = null,
   roughCutExists = false,
+  finalDeclined = false,
 }) {
   const roughCut = roughCutExists ? activeRoughCut(manifest) : null;
   const preview = manifest.currentPreview || null;
@@ -46,6 +53,8 @@ function deriveVariantStatus({
     sha256: preview.sha256 || null,
   } : null;
   const finalVideo = finalExists ? { kind: 'final', path: manifest.final, sha256: null } : null;
+  const waitsForFinal = !roughCut && currentBriefStatus === 'approved' && !finalIsCurrent;
+  const declined = waitsForFinal && Boolean(finalDeclined);
 
   // Порядок проверок: новые правки, черновая нарезка (ждёт автора или подтверждена),
   // затем прежняя логика preview и финала.
@@ -63,6 +72,9 @@ function deriveVariantStatus({
   } else if (finalIsCurrent) {
     status = 'ready';
     nextStep = 'Готов – можно забирать';
+  } else if (declined) {
+    status = 'ready';
+    nextStep = FINAL_DECLINED_NEXT_STEP;
   } else if (currentBriefStatus === 'approved') {
     status = 'working';
     nextStep = 'Утверждено – агент собирает финал';
@@ -79,7 +91,8 @@ function deriveVariantStatus({
 
   const showPreview = status === 'waiting' || (pendingComments > 0 && previewIsCurrent);
   // Пока этап нарезки активен, утверждённый brief прежнего монтажа финала не ждёт: идёт новый монтаж.
-  const needsFinal = !roughCut && currentBriefStatus === 'approved' && !finalIsCurrent;
+  // Отказ от финала снимает ожидание: строки «Утверждено» во входящих больше нет.
+  const needsFinal = waitsForFinal && !declined;
   // Активная нарезка остаётся на экране и с новыми правками: они оставлены именно к ней.
   // Пока агент собирает финал утверждённой версии, финал на диске (если он есть) относится
   // к прежней версии: показываем утверждённый preview, чтобы новые правки цеплялись к нему.
@@ -87,7 +100,8 @@ function deriveVariantStatus({
   if (roughCut) {
     video = { kind: 'roughcut', path: roughCut.filePath, sha256: roughCut.sha256 };
   } else {
-    video = (showPreview || (needsFinal && previewVideo)) ? previewVideo : (finalVideo || previewVideo);
+    // При отказе от финала на экране остаётся утверждённый preview, а не финал прежней версии.
+    video = (showPreview || (waitsForFinal && previewVideo)) ? previewVideo : (finalVideo || previewVideo);
   }
   return {
     status,
@@ -96,6 +110,7 @@ function deriveVariantStatus({
     // Утвердить можно только preview: черновую нарезку подтверждают отдельной кнопкой.
     approvable: status === 'waiting' && !approvalBlocker && video?.kind === 'preview',
     needsFinal,
+    finalDeclined: declined,
     briefPath: manifest.currentBrief,
     previewSha256: preview ? preview.sha256 || null : null,
     // confirmedAt – ISO-время подтверждения (только у confirmed): по нему блок нарезки рисует
@@ -111,4 +126,6 @@ function deriveVariantStatus({
   };
 }
 
-module.exports = { STATUS_ORDER, deriveVariantStatus, pluralEdits };
+module.exports = {
+  FINAL_DECLINED_NEXT_STEP, STATUS_ORDER, deriveVariantStatus, pluralEdits,
+};

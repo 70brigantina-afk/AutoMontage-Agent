@@ -45,6 +45,15 @@ test('AGENTS.md says an explicit "утверждаю" in the current chat is its
   assert.match(text, /Явное\s+«утверждаю»\s+в\s+текущем\s+чате\s+уже\s+и\s+есть\s+просьба/u);
 });
 
+// «Финал не нужен» (#104, DECISIONS.md D-050) – решение пользователя, как и утверждение.
+test('AGENTS.md forbids declining a final on the user\'s behalf and names the CLI flags', () => {
+  const text = read('AGENTS.md');
+  assert.match(text, /никогда[\s\S]{0,120}\/api\/final-declined/iu);
+  assert.match(text, /--decline-final <папка>[\s\S]{0,80}только по явным\s+словам пользователя/u);
+  assert.match(text, /--restore-final <папка>/u);
+  assert.match(text, /новое утверждение того\s+же ролика[\s\S]{0,60}снова приносит строку «Утверждено»/u);
+});
+
 for (const file of ['AGENTS.md', 'skills/reel-turnkey/SKILL.md', 'skills/reel-from-donor/SKILL.md', 'skills/motion-reel/SKILL.md']) {
   test(`${file} explains --accept takes a folder name without the projects/ prefix`, () => {
     const text = read(file);

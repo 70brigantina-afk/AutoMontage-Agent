@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { deriveVariantStatus, pluralEdits } = require('../scripts/pult/status');
+const { FINAL_DECLINED_NEXT_STEP, deriveVariantStatus, pluralEdits } = require('../scripts/pult/status');
 
 const BRIEF = 'brief/v02-draft.lesson.json';
 const APPROVED = 'brief/v03-approved.lesson.json';
@@ -262,4 +262,53 @@ test('an active rough cut does not ask for a final of an older approved brief', 
   assert.equal(result.status, 'waiting');
   assert.equal(result.needsFinal, false);
   assert.deepEqual(result.video, ROUGH_CUT_VIDEO);
+});
+
+// «Финал не нужен» (#104, DECISIONS.md D-050): утверждённая версия без финала, по которой
+// пользователь решил, что финал не нужен, больше не ждёт агента и не попадает во входящие.
+test('an approved brief whose final the user declined is ready and needs no final', () => {
+  const result = derive({ currentBrief: APPROVED }, { currentBriefStatus: 'approved', finalDeclined: true });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.nextStep, FINAL_DECLINED_NEXT_STEP);
+  assert.equal(result.nextStep, 'Финал не нужен');
+  assert.equal(result.needsFinal, false);
+  assert.equal(result.finalDeclined, true);
+  assert.equal(result.approvable, false);
+  // На экране – тот самый утверждённый preview, а не финал прежней версии.
+  assert.equal(result.video.kind, 'preview');
+  const withOldFinal = derive({
+    currentBrief: APPROVED,
+    renders: [{ version: 1, label: 'old', dir: 'renders/v01-old', briefPath: 'brief/v01-approved.lesson.json', status: 'complete' }],
+    latestRender: 'renders/v01-old',
+  }, { currentBriefStatus: 'approved', finalExists: true, finalDeclined: true });
+  assert.equal(withOldFinal.video.kind, 'preview');
+  assert.equal(withOldFinal.status, 'ready');
+});
+
+test('a declined final keeps the precedence of new edits and of an active rough cut', () => {
+  const commented = derive({ currentBrief: APPROVED }, { currentBriefStatus: 'approved', finalDeclined: true, pendingComments: 2 });
+  assert.equal(commented.status, 'working');
+  assert.equal(commented.nextStep, 'Ждёт агента: 2 правки');
+  assert.equal(commented.needsFinal, false);
+  assert.equal(commented.finalDeclined, true);
+  const cut = derive({ currentBrief: APPROVED, roughCut: ROUGH_CUT }, {
+    currentBriefStatus: 'approved', roughCutExists: true, finalDeclined: true,
+  });
+  assert.equal(cut.status, 'waiting');
+  assert.equal(cut.finalDeclined, false);
+  assert.equal(cut.needsFinal, false);
+});
+
+test('the declined flag means nothing for drafts and for a version that already has its final', () => {
+  const draft = derive({}, { finalDeclined: true });
+  assert.equal(draft.status, 'waiting');
+  assert.equal(draft.finalDeclined, false);
+  const built = derive({
+    currentBrief: APPROVED,
+    renders: [{ version: 1, label: 'final', dir: 'renders/v01-final', briefPath: APPROVED, status: 'complete' }],
+    latestRender: 'renders/v01-final',
+  }, { currentBriefStatus: 'approved', finalExists: true, finalDeclined: true });
+  assert.equal(built.nextStep, 'Готов – можно забирать');
+  assert.equal(built.finalDeclined, false);
+  assert.equal(derive().finalDeclined, false);
 });

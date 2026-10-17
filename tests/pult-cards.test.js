@@ -136,6 +136,25 @@ test('an archived group card prefixes the honest next step with the variant labe
   assert.equal(card.nextStep, 'Вариант А: Утверждено, в архиве – агент соберёт финал по вашей просьбе');
 });
 
+// «Финал не нужен» (#104): отказ от финала снимает и архивную пометку – такой вариант не
+// ждёт финала, значит, ни честной архивной надписи, ни флага archivedNeedsFinal у него нет.
+test('a declined final on an archived card is not an archived approval waiting for its final', () => {
+  const sections = buildCards(scan([
+    entry({
+      folder: 'declined',
+      status: 'ready',
+      nextStep: 'Финал не нужен',
+      needsFinal: false,
+      finalDeclined: true,
+      pendingComments: 0,
+    }),
+  ]), { archived: ['folder:declined'] });
+  const card = sections.archive[0];
+  assert.equal(card.nextStep, 'Финал не нужен');
+  assert.equal(card.status, 'ready');
+  assert.equal(card.variants[0].archivedNeedsFinal, undefined);
+});
+
 test('a lead magnet moves the card to its more urgent section without touching the video', () => {
   const sections = buildCards(scan([
     entry({ folder: 'done', leadMagnet: { ask: false, status: 'waiting', nextStep: 'Лид-магнит: посмотрите и утвердите' } }),
