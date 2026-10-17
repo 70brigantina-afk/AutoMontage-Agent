@@ -66,13 +66,16 @@ function deps(manifest, extra = {}) {
 
 const NOW = new Date('2026-10-17T09:08:07.000Z');
 
-test('runFinalQa: пишет qa/final-<stamp>.json и .txt с гейтами F1–F5 и G13', async (t) => {
+test('runFinalQa: пишет qa/final-<stamp>.json и .txt с гейтами F1–F5 и G13–G15', async (t) => {
   const p = project(t);
   const { deps: d, calls } = deps(p.manifest);
   const { report, paths } = await runFinalQa({ projectDir: p.dir, finalPath: p.finalPath, now: NOW }, d);
   assert.equal(report.kind, 'final');
   assert.equal(report.error, null);
-  assert.deepEqual(report.gates.map((g) => g.id), ['F1', 'F2', 'F3', 'F4', 'F5', 'G13']);
+  assert.deepEqual(report.gates.map((g) => g.id), ['F1', 'F2', 'F3', 'F4', 'F5', 'G13', 'G14', 'G15']);
+  // Без данных рендера (не из build.js) надписи на кадрах не замеряются.
+  assert.equal(byId(report.gates, 'G14').status, 'skipped');
+  assert.equal(byId(report.gates, 'G15').status, 'skipped');
   assert.equal(byId(report.gates, 'F1').status, 'warn');
   assert.equal(byId(report.gates, 'F2').status, 'pass');
   assert.equal(byId(report.gates, 'F3').status, 'pass');
@@ -85,7 +88,7 @@ test('runFinalQa: пишет qa/final-<stamp>.json и .txt с гейтами F1�
   // Модель по умолчанию – как в build.js; расшифровывается именно финал.
   assert.deepEqual(calls.transcribe, [{ videoPath: p.finalPath, model: 'large-v3-turbo' }]);
   assert.deepEqual(report.inputs, [{ role: 'final', path: 'final/ролик.mp4' }, { role: 'transcript', path: 'transcript/words.json' }]);
-  assert.deepEqual(FINAL_CHECKS.map((c) => c.id), ['transcript', 'cover']);
+  assert.deepEqual(FINAL_CHECKS.map((c) => c.id), ['transcript', 'cover', 'text-layout']);
 });
 
 test('runFinalQa: write false – отчёт без файлов, модель передаётся в расшифровку', async (t) => {
@@ -245,6 +248,17 @@ test('finalQaChildArgs и runFinalQaSync: аргументы дочернего 
   }), false);
   assert.deepEqual(lines, ['final QA не выполнен: spawn node ENOENT']);
 
+  // Данные рендера уходят одним --render-json; битые не отменяют остальной QA.
+  const render = { entry: 'src/index.js', compositionId: 'Lesson', propsPath: '/p/x.json', publicDir: '/p/pub', fps: 25, width: 1080, height: 1920 };
+  assert.deepEqual(finalQaChildArgs({ finalPath: '/o/f.mp4', render }).slice(-2), ['--render-json', JSON.stringify(render)]);
+  const withRender = [];
+  const renderLines = [];
+  assert.equal(runFinalQaSync({ enabled: true, finalPath: '/o/f.mp4', render: { ...render, width: 0 }, log: (m) => renderLines.push(m) }, {
+    runNodeToolImpl: (...callArgs) => withRender.push(callArgs),
+  }), true);
+  assert.equal(withRender[0][1].includes('--render-json'), false);
+  assert.match(renderLines[0], /надписи на кадрах не проверить – --render-json: width/);
+
   assert.equal(runFinalQaSync({ enabled: false, finalPath: '/o/f.mp4', log: (m) => lines.push(m) }, {
     runNodeToolImpl: () => { throw new Error('не должен вызываться'); },
   }), false);
@@ -322,7 +336,19 @@ test('build.js lesson: финальный QA – отдельный процес
   assert.equal(result.status, 0, result.stderr);
   const qa = invocations.filter((c) => path.basename(String(c.args[0])) === 'final-qa.js');
   assert.equal(qa.length, 1);
-  assert.deepEqual(qa[0].args.slice(1), ['--from-build', '--final', final, '--model', 'large-v3-turbo']);
+  assert.deepEqual(qa[0].args.slice(1, 6), ['--from-build', '--final', final, '--model', 'large-v3-turbo']);
+  // Данные рендера для G14/G15: та же композиция, props и public lease, что у рендера урока.
+  assert.equal(qa[0].args[6], '--render-json');
+  const render = JSON.parse(qa[0].args[7]);
+  const lessonRender = invocations.find((c) => c.args.includes('render') && c.args.includes('--public-dir'));
+  assert.ok(lessonRender, JSON.stringify(invocations.map((c) => c.args.slice(0, 3))));
+  const argAfter = (flag) => lessonRender.args[lessonRender.args.indexOf(flag) + 1];
+  assert.equal(render.entry, 'src/index.js');
+  assert.ok(lessonRender.args.includes(render.compositionId), render.compositionId);
+  assert.equal(render.propsPath, argAfter('--props'));
+  assert.equal(render.publicDir, argAfter('--public-dir'));
+  assert.deepEqual([render.width, render.height], [1080, 1920]);
+  assert.ok(render.fps > 0);
   assert.match(result.stdout, /final QA не выполнен: /);
   assert.match(result.stdout, /готово по утверждённому ТЗ/);
 });

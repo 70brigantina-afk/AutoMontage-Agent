@@ -145,12 +145,15 @@ const scenarioFile = opt('scenario', null);
 const log = (m) => console.log('· ' + m);
 // Финальный QA: повторная расшифровка готового MP4 отдельным процессом (scripts/qa/final-qa.js).
 // Только предупреждения: любой сбой – строка в логе, финал публикуется как обычно.
-const finalQa = (finalFile, hasMusic) => runFinalQaSync({
+// render – данные рендера для замера надписей (G14/G15): та же композиция, props и public. Зовётся
+// внутри колбэка lease, пока его publicDirectory ещё существует.
+const finalQa = (finalFile, hasMusic, render = null) => runFinalQaSync({
   enabled: !args.includes('--no-final-qa'),
   projectDir: buildContext.project ? buildContext.project.dir : null,
   finalPath: finalFile,
   hasMusic,
   model,
+  render,
   log,
 });
 const runNodeCapture = (script, scriptArgs, stage = script) => captureTool(
@@ -507,7 +510,15 @@ if (lessonAction === 'render') {
           fs.copyFileSync(mixedMp4L, outMp4L);
           fs.unlinkSync(mixedMp4L);
         }
-        finalQa(outMp4L, Boolean(prepared.music));
+        finalQa(outMp4L, Boolean(prepared.music), {
+          entry: 'src/index.js',
+          compositionId: prepared.composition,
+          propsPath: lessonPropsPath,
+          publicDir: lease.publicDirectory,
+          fps: prepared.props.fps,
+          width: prepared.props.width,
+          height: prepared.props.height,
+        });
         return outMp4L;
       })
     ));
@@ -725,7 +736,16 @@ try {
         log(`⚠️ музыка не найдена: ${musPath} – пропускаю`);
       }
     }
-    finalQa(outMp4, musicMixed);
+    // Dynamic рендерится без --public-dir (и порциями тоже): public/ корня движка.
+    finalQa(outMp4, musicMixed, {
+      entry: 'src/index.js',
+      compositionId: 'Dynamic',
+      propsPath,
+      publicDir: path.join(ROOT, 'public'),
+      fps: FPS,
+      width: W,
+      height: H,
+    });
     return outMp4;
     });
     if (outDir) {   // глобальный запуск: положить результат рядом с пользователем
