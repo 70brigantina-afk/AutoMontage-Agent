@@ -101,6 +101,40 @@ Timeout, разрыв ответа или неоднозначный сбой н
 не удаляй `attempt.json`, не обходи блокировку новым проектом. Повреждённый кэш требует разбора,
 а не новой оплаты. При отсутствии согласия продолжи с готовым локальным аудио.
 
+### Музыкальный ролик без речи
+
+Промо, трейлер или ролик из AI-кадров под музыку без голоса собирай флагом `--music-only`:
+
+```bash
+automontage motion soundtrack.wav --project "Название ролика" --music-only
+automontage motion --project-dir projects/<id> --music-only
+```
+
+Вторая команда продолжает уже созданный проект, например после ошибки «narration transcript
+is empty» (CLI сам печатает её с путём проекта) или после сбоя Whisper, который не успел записать
+`transcript/words.json`. Проект, где в транскрипте уже есть речь, флаг не переделывает: ответ
+`--music-only refuses a project whose transcript already has speech; use the narration path`.
+Флаг нельзя сочетать с `--model`, `--brief`, `--version-label`, `--script`, `--voice`, `--voice-id`,
+`--accept-provider-cost`. Правила для такого ролика:
+
+- источник – готовый сведённый саундтрек (музыка, удары, свуши), он и есть мастер-аудио; файл
+  остаётся `input/narration.<ext>`, а в brief стоит `audioRole: "music"`;
+- Whisper не запускается, `transcript/words.json` – пустой `[]`; тайминги сцен ставь по
+  долям и акцентам трека, края – по кадрам FPS brief;
+- блок `music` в brief запрещён: дополнительную музыку сведи в сам исходник;
+- экранный текст – только утверждённый пользователем текст, не выдумывай слоганы и цифры;
+- разрешён project-local Remotion-пакет из `projects/<id>/motion-vNN/`: рендер с
+  `withAudio=false` ровно на `durationInFrames` brief, подключение одной полноразмерной
+  `media`-сценой (start 0, end = длительность, `fit: cover`, `audioMode: mute`,
+  `frame: "full"` – клип на весь кадр без рамки и зума сцены) через
+  `publishBriefRevision`. Preview motion-reel гейты не запускает (D-038), поэтому QA такого
+  пакета – ручной: полный просмотр, safe zones, текст, синхронизация с треком;
+- слой motion-kit (`automontage layer`) медиа-сценой по-прежнему не ставь.
+
+Дальше обычный путь: preview → ручной QA → явное «утверждаю» пользователя →
+`approve-brief --confirm-preview-viewed` → final. Генерацию AI-кадров, бюджет и provenance
+ведёт навык [ai-promo](../ai-promo/SKILL.md).
+
 ## 3. Подготовь timed motion brief
 
 Прочитай `transcript/words.json`, сверь script и фактическую речь, длительность и конец слов.
@@ -150,8 +184,16 @@ Preview проходит через настоящий `MotionReel`, содер�
 
 ## 5. Явное утверждение, final и QA
 
-Только после однозначного утверждения пользователем именно показанной версии и подтверждения
-полного просмотра выполни:
+Если пользователь нажал «Утверждаю» в пульте (в `automontage inbox` строка «Утверждено»),
+`approveBrief` уже выполнен и `brief/vNN-approved.motion.json` создан – сразу собирай final:
+
+```bash
+automontage motion --project-dir projects/<id> --brief brief/vNN-approved.motion.json --version-label reviewed
+```
+
+При явном «утверждаю» в чате – только после однозначного утверждения пользователем именно
+показанной версии и подтверждения полного просмотра – сначала утверди brief, затем та же
+команда final:
 
 ```bash
 node scripts/project/approve-brief.js projects/<id> brief/vNN-draft.motion.json --confirm-preview-viewed

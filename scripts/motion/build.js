@@ -28,12 +28,19 @@ function parseMotionOptions(argv) {
     if (arg === '--accept-provider-cost' && !seen.has(arg)) {
       seen.add(arg); options.acceptProviderCost = true; continue;
     }
+    if (arg === '--music-only' && !seen.has(arg)) {
+      seen.add(arg); options.musicOnly = true; continue;
+    }
     const key = flags.get(arg);
     if (!key || seen.has(arg)) throw new Error(`unknown or duplicate motion option: ${arg}`);
     seen.add(arg);
     const value = argv[++index];
     if (!value || value.startsWith('--')) throw new Error(`${arg} requires a value`);
     options[key] = value;
+  }
+  if (options.musicOnly && ['model', 'briefPath', 'versionLabel', 'scriptPath', 'voice', 'voiceId', 'acceptProviderCost']
+    .some(key => options[key] !== undefined)) {
+    throw new Error('--music-only works only with <audio> --project <name> or --project-dir <dir>; it cannot be combined with --model, --brief, --version-label, --script, --voice, --voice-id or --accept-provider-cost');
   }
   if (options.scriptPath) {
     if (options.voice !== 'elevenlabs' || options.narrationPath || options.briefPath || !options.project || options.model) {
@@ -102,6 +109,14 @@ function verifyMotionApproval(workspace, entry, approved) {
   } catch (error) { draft.close(); preview?.close(); throw error; }
 }
 
+// Project directory for the printed resume command: relative to cwd, quoted for the shell when needed.
+function resumeDir(projectDir) {
+  const relative = path.relative(process.cwd(), projectDir);
+  // A leading dash would be read as an option, so it is anchored to the current directory.
+  const shown = relative ? (relative.startsWith('-') ? `./${relative}` : relative) : '.';
+  return /^[\w./:-]+$/u.test(shown) ? shown : `'${shown.replaceAll("'", "'\\''")}'`;
+}
+
 function runMotion(options, dependencies = {}) {
   if (options.scriptPath) return runScriptMotion(options, dependencies);
   const root = dependencies.root || ROOT;
@@ -114,13 +129,35 @@ function runMotion(options, dependencies = {}) {
     dependencies.narrationGuard?.assertCurrent();
     if (workspace.manifest.currentBrief) throw new Error('project already has a brief; continue with preview or an approved --brief');
     const wordsPath = resolveProjectPath(workspace.dir, workspace.manifest.transcript.words, { mustExist: false, type: 'file' });
-    const transcript = fs.existsSync(wordsPath)
-      ? validateCanonicalTranscript(JSON.parse(fs.readFileSync(wordsPath, 'utf8')))
-      : (dependencies.transcribeMotionNarrationImpl || transcribeMotionNarration)({ root, workspace, model: options.model }).transcript;
-    const text = transcript.map(segment => segment.text.trim()).filter(Boolean).join(' ').slice(0, 120);
-    if (!text) throw new Error('narration transcript is empty; a motion draft requires speech text');
+    const speechText = transcript => transcript.map(segment => segment.text.trim()).filter(Boolean).join(' ').slice(0, 120);
+    let text;
+    if (options.musicOnly) {
+      // Voiceless reel: the source is the final soundtrack, Whisper never runs and the transcript stays [].
+      if (fs.existsSync(wordsPath)) {
+        if (speechText(validateCanonicalTranscript(JSON.parse(fs.readFileSync(wordsPath, 'utf8'))))) {
+          throw new Error('--music-only refuses a project whose transcript already has speech; use the narration path');
+        }
+      } else {
+        const privacyGuard = workspace.privacyGuard || require('../project/private-workspace').preparePrivateWorkspace(workspace.dir);
+        privacyGuard.assertCurrent();
+        writeFilesNoReplace([{ destination: wordsPath, data: '[]\n', purpose: 'motion-music-only-words' }], {
+          assertParentCurrent: privacyGuard.assertCurrent,
+        });
+      }
+      text = workspace.manifest.name.slice(0, 120);
+    } else {
+      const transcript = fs.existsSync(wordsPath)
+        ? validateCanonicalTranscript(JSON.parse(fs.readFileSync(wordsPath, 'utf8')))
+        : (dependencies.transcribeMotionNarrationImpl || transcribeMotionNarration)({ root, workspace, model: options.model }).transcript;
+      text = speechText(transcript);
+      if (!text) {
+        throw new Error('narration transcript is empty; a motion draft requires speech text. '
+          + `For a voiceless music reel continue this project: automontage motion --project-dir ${resumeDir(workspace.dir)} --music-only`);
+      }
+    }
     const durationInFrames = Math.max(1, Math.ceil(probe.durationSec * 30));
     const brief = { version: 1, kind: 'motion-reel', status: 'draft', source: workspace.manifest.source.localPath,
+      ...(options.musicOnly ? { audioRole: 'music' } : {}),
       theme: 'motion-neutral', title: workspace.manifest.name.slice(0, 120),
       output: { aspect: 'vertical', width: 1080, height: 1920, fps: 30, durationInFrames },
       scenes: [{ scene: 'kinetic-title', start: 0, end: durationInFrames / 30, text }],
@@ -240,14 +277,17 @@ async function runScriptMotion(options, dependencies) {
 
 async function main(argv = process.argv.slice(2)) {
   if (argv.length === 1 && ['--help', '-h'].includes(argv[0])) {
-    console.log('automontage motion <audio> --project <name> [--model <Whisper model>]\nautomontage motion --script <file.txt> --voice elevenlabs --project <name> [--voice-id <voice-id>] --accept-provider-cost\n  ElevenLabs is a separate paid API; private ELEVENLABS_API_KEY and voice ID required.\nautomontage motion --project-dir <dir> --brief <approved.json> [--version-label <label>]\nLocal narration → transcript/scaffold → preview → explicit approval → final.');
+    console.log('automontage motion <audio> --project <name> [--model <Whisper model>]\nautomontage motion --script <file.txt> --voice elevenlabs --project <name> [--voice-id <voice-id>] --accept-provider-cost\n  ElevenLabs is a separate paid API; private ELEVENLABS_API_KEY and voice ID required.\nautomontage motion <audio> --project <name> --music-only\nautomontage motion --project-dir <dir> --music-only\n  Voiceless reel: the audio is the final premixed soundtrack; no Whisper, empty transcript, brief audioRole music.\nautomontage motion --project-dir <dir> --brief <approved.json> [--version-label <label>]\nLocal narration → transcript/scaffold → preview → explicit approval → final.');
     return;
   }
   try {
     configureMediaToolPath();
-    const result = await runMotion(parseMotionOptions(argv));
-    console.log(result.action === 'draft' ? `Motion draft scaffold: ${result.jsonPath}\nReview the transcript and author the scene plan before preview.` : `Motion final: ${result.finalPath}`);
+    const options = parseMotionOptions(argv);
+    const result = await runMotion(options);
+    const next = options.musicOnly ? 'Music-only: no transcript; author the scene plan to the soundtrack before preview.'
+      : 'Review the transcript and author the scene plan before preview.';
+    console.log(result.action === 'draft' ? `Motion draft scaffold: ${result.jsonPath}\n${next}` : `Motion final: ${result.finalPath}`);
   } catch (error) { console.error(`Motion cancelled: ${error.message}`); process.exitCode = 1; }
 }
 if (require.main === module) main();
-module.exports = { parseMotionOptions, runMotion, main };
+module.exports = { parseMotionOptions, resumeDir, runMotion, main };

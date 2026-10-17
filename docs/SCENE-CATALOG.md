@@ -87,7 +87,15 @@ Optional `caption` ≤160 разрешён, но обычной полосы с�
 workspace; SHA-256 обязателен. Video поддерживает `trimStartSec` и `audioMode`:
 `mute` сохраняет только озвучку, `mix` добавляет тихий звук клипа, `replace` заменяет её
 звуком клипа на время сцены. Все источники должны покрывать выбранный отрезок; remote URL
-не поддерживаются. Optional music задаётся на уровне brief и проходит общее finish/ducking.
+не поддерживаются. Optional `frame` у video равен `card` (по умолчанию: клип в карточке сцены
+с рамкой и зумом) или `full` (клип на весь кадр 1080×1920 без рамки и зума; `overlayText` и
+`caption` тогда запрещены). Optional music задаётся на уровне brief и проходит общее finish/ducking.
+
+В ролике без речи (`audioRole: "music"`, `automontage motion … --music-only`) источник сам
+является саундтреком, поэтому `music` в brief запрещено. Project-local слой такого ролика
+подключается одной `media`-сценой на всю длину: `start: 0`, `end` равен длительности,
+`kind: video`, `fit: cover`, `audioMode: mute`, `frame: "full"`. Видео рендерится без звука и не короче сцены,
+иначе preflight его отклонит.
 
 Публичный [пример](../examples/motion-brief-demo.json) покрывает все семь ID. Его тестовые тоны
 и PNG создаёт `automontage demo --motion` локально; это не человеческая речь. Детали пакета,

@@ -158,6 +158,7 @@ legacy/developer opt-in и не входит в стандартный путь 
 | faster-whisper | локальная расшифровка; модель может скачаться из Hugging Face при первом запуске | нет |
 | Pexels API | необязательный поиск готовых фото и видео в Review и `automontage layer stock` | `PEXELS_API_KEY` |
 | ElevenLabs API | необязательная платная озвучка motion по явному согласию | `ELEVENLABS_API_KEY`, приватный `ELEVENLABS_VOICE_ID` |
+| Higgsfield (MCP) | необязательная платная генерация кадров и клипов для AI-промо после подтверждения бюджета кредитов | нет, OAuth-вход MCP в Claude Code |
 | FFmpeg, Remotion, Tesseract | локальный монтаж, preview, render, нормализация и OCR | нет |
 | Anthropic/OpenAI API | только отдельные legacy/developer-скрипты или явно подтверждённая генерация | опционально, возможна оплата |
 | Pixabay/Openverse | зарезервированы для будущих провайдеров, в v1.6.0 не подключены | оставить пустыми |
@@ -193,6 +194,36 @@ workspace, включая явный `--project-dir` и установку npm �
 Видео сцены проверяется до preview/final: `mix` и `replace` требуют аудиопоток, `mute`
 допускает видео без звука. Обрезка должна помещаться в клип; для `replace` – также в его аудио.
 Если `audioMode` или `trimStartSec` не заданы, используются `mute` и `0` соответственно.
+Optional `media.frame` у video равен `card` (по умолчанию: клип в карточке сцены) или `full`
+(клип на весь кадр без рамки и зума сцены, без `overlayText` и `caption`).
+
+### Ролик без речи: `--music-only`
+
+Для музыкального ролика без голоса источник – готовый смешанный саундтрек (музыка, удары,
+свипы, −14 LUFS), а не речь:
+
+```bash
+automontage motion soundtrack.wav --project "Промо" --music-only
+automontage motion --project-dir projects/<id> --music-only
+```
+
+Вторая форма продолжает уже созданную папку: например, если обычный запуск остановился
+с ошибкой «narration transcript is empty», команда в тексте ошибки переводит этот проект
+в музыкальный режим. Whisper не запускается, `transcript/words.json` остаётся пустым `[]`,
+scaffold получает `audioRole: "music"` и одну сцену `kinetic-title` с названием проекта.
+Файл по-прежнему лежит в `input/narration.*`, но это мастер-звук ролика; поле `music` в таком
+brief запрещено – дополнительную музыку смешай в сам источник. Флаг несовместим с `--model`,
+`--brief`, `--version-label`, `--script`, `--voice`, `--voice-id`, `--accept-provider-cost`.
+Та же форма `--project-dir` продолжает папку после сбоя Whisper без `words.json`; проект, где в
+транскрипте уже есть речь, команда отклоняет. Preview, явное утверждение и final – те же команды,
+что выше; без браузера (например по SSH) preview запускается с `--no-open`.
+
+**AI-промо.** [Навык ai-promo](skills/ai-promo/SKILL.md) собирает такой ролик из сгенерированных
+кадров и клипов, project-local Remotion-слоя и саундтрека: слой рендерится без звука ровно
+на длину ролика и подключается одной `media`-сценой с `frame: "full"`. Генерация через
+Higgsfield тратит кредиты тарифа и идёт только после явного «да» на смету: на партию или на весь
+план с разбивкой по партиям. Простой путь для новичка –
+[урок курса](docs/reels-guide/10-ai-promo.md).
 
 ### Офлайн-демо без ключей и Whisper
 
@@ -951,7 +982,7 @@ Remotion (анимация плашек кодом), faster-whisper (распо�
 
 ### Версии и история изменений
 
-Текущая версия исходников: **v1.13.0**. Опубликованные сборки находятся на странице
+Текущая версия исходников: **v1.14.0**. Опубликованные сборки находятся на странице
 [GitHub Releases](https://github.com/mcdenil-skills/AutoMontage-Agent/releases). Источник номера
 в репозитории – `version` в `package.json` и корневая запись в `package-lock.json`; состав
 релиза описан в [CHANGELOG.md](CHANGELOG.md).

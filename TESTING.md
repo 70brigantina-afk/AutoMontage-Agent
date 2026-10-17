@@ -740,6 +740,39 @@ Opt-in media regression создаёт WAV и MP4 локально, вызыва
 `AUTOMONTAGE_MOTION_E2E_DIR` (каталог должен существовать); без него временные файлы удаляются.
 Никаких provider calls, ключей или личных медиа этот тест не требует.
 
+## Ролик без речи: `--music-only` и навык ai-promo
+
+```bash
+node --test tests/motion-music-only.test.js tests/ai-promo-skill.test.js
+```
+
+`motion-music-only.test.js` проверяет, что `--music-only` не запускает Whisper, пишет
+`words.json` равным `[]` и scaffold с `audioRole: "music"`, отклоняет несовместимые флаги
+и повторы, запрещает `brief.music` при `audioRole: "music"`, продолжает созданную папку через
+`--project-dir` и печатает точную команду продолжения при пустой расшифровке речевого маршрута.
+Старые brief без `audioRole` проходят без изменений. `ai-promo-skill.test.js` проверяет навык:
+frontmatter, adapters в `.agents/`, `.claude/`, `.codex/`, ссылки на references и шаблон,
+правила бюджета кредитов, согласия на внешность и отсутствие токенов, личных путей и CDN-ссылок.
+
+Project-local пакет такого ролика подключается одной `media`-сценой с `frame: "full"`.
+Гейты к preview ролика без речи не применяются (см. `docs/MOTION-KIT.md`), поэтому перед
+показом пользователю агент вручную проверяет `previews/current-preview.mp4` по
+[чек-листу ai-promo](skills/ai-promo/references/qa-checklist.md):
+
+```bash
+ffprobe -v error -show_streams -show_format -of json previews/current-preview.mp4
+ffmpeg -v info -i previews/current-preview.mp4 -vf blackdetect=d=0.1:pix_th=0.10 -an -f null -
+ffmpeg -v info -i previews/current-preview.mp4 -af ebur128=peak=true -f null -
+```
+
+Ожидание: H.264/AAC, геометрия и FPS brief, длительность равна саундтреку, один аудиопоток
+48000 Гц;
+нет чёрных кадров вне задуманных; Integrated −14 ± 1 LUFS, True Peak ≤ −1,5 dBTP. Контактный
+лист (кадр в секунду: `-vf fps=1,scale=216:-1,tile=6x5` покрывает 30 с) просматривается целиком:
+текст в safe-zone, нет артефактов генерации и чужих логотипов. Final после утверждения
+проверяется так же. Строка `soundtrack mean <x> dB` из `node scripts/qa-preview.js` – это
+`mean_volume` источника в dBFS, а не LUFS: громкость сверяется только по `ebur128`.
+
 ## Необязательная ElevenLabs-озвучка
 
 ```bash
