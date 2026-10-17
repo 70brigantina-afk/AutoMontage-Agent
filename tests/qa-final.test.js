@@ -56,6 +56,7 @@ function deps(manifest, extra = {}) {
     calls,
     deps: {
       readManifestImpl: () => manifest,
+      frameStatsImpl: () => ({ edgeShare: 0.05, meanLuma: 110 }),
       transcribeImpl: (options) => { calls.transcribe.push(options); return [{ words: FINAL_WORDS }]; },
       readLevelsImpl: (file) => { calls.levels.push(file); return levelsFor(FINAL_WORDS, 3); },
       ...extra,
@@ -65,13 +66,13 @@ function deps(manifest, extra = {}) {
 
 const NOW = new Date('2026-10-17T09:08:07.000Z');
 
-test('runFinalQa: пишет qa/final-<stamp>.json и .txt с пятью гейтами F1–F5', async (t) => {
+test('runFinalQa: пишет qa/final-<stamp>.json и .txt с гейтами F1–F5 и G13', async (t) => {
   const p = project(t);
   const { deps: d, calls } = deps(p.manifest);
   const { report, paths } = await runFinalQa({ projectDir: p.dir, finalPath: p.finalPath, now: NOW }, d);
   assert.equal(report.kind, 'final');
   assert.equal(report.error, null);
-  assert.deepEqual(report.gates.map((g) => g.id), ['F1', 'F2', 'F3', 'F4', 'F5']);
+  assert.deepEqual(report.gates.map((g) => g.id), ['F1', 'F2', 'F3', 'F4', 'F5', 'G13']);
   assert.equal(byId(report.gates, 'F1').status, 'warn');
   assert.equal(byId(report.gates, 'F2').status, 'pass');
   assert.equal(byId(report.gates, 'F3').status, 'pass');
@@ -84,8 +85,7 @@ test('runFinalQa: пишет qa/final-<stamp>.json и .txt с пятью гей�
   // Модель по умолчанию – как в build.js; расшифровывается именно финал.
   assert.deepEqual(calls.transcribe, [{ videoPath: p.finalPath, model: 'large-v3-turbo' }]);
   assert.deepEqual(report.inputs, [{ role: 'final', path: 'final/ролик.mp4' }, { role: 'transcript', path: 'transcript/words.json' }]);
-  assert.equal(FINAL_CHECKS.length, 1);
-  assert.equal(FINAL_CHECKS[0].id, 'transcript');
+  assert.deepEqual(FINAL_CHECKS.map((c) => c.id), ['transcript', 'cover']);
 });
 
 test('runFinalQa: write false – отчёт без файлов, модель передаётся в расшифровку', async (t) => {

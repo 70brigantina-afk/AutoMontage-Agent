@@ -98,7 +98,20 @@ async function transcriptCheck(ctx) {
 
 // Проверки финала; план ТОП-3 / 3 добавляет сюда свои. Проверка: {id, run(ctx) -> Promise<Gate[]>},
 // ctx = {projectDir, finalPath, manifest, hasMusic, model, deps}.
-const FINAL_CHECKS = [{ id: 'transcript', run: transcriptCheck }];
+// G13: кадр 0 финала. Ошибка замера (нет ffmpeg, битый файл) – warn «не удалось прочитать», не исключение.
+async function coverCheck(ctx) {
+  const { coverFrameGate } = require('./cover-frame-gate');
+  const measure = (ctx.deps && ctx.deps.frameStatsImpl) || require('../layer/sheet').frameStats;
+  let stats = null;
+  try {
+    stats = await measure(ctx.finalPath, 0);
+  } catch (_) {
+    stats = null;
+  }
+  return [coverFrameGate(stats)];
+}
+
+const FINAL_CHECKS = [{ id: 'transcript', run: transcriptCheck }, { id: 'cover', run: coverCheck }];
 
 function relativeInput(baseDir, file) {
   return path.relative(baseDir, file).split(path.sep).join('/');
@@ -261,5 +274,5 @@ if (require.main === module) {
 
 module.exports = {
   DEFAULT_MODEL, FINAL_CHECKS, MUSIC_SKIP_REASON,
-  finalQaChildArgs, findVoicedGaps, main, maybeRunFinalQa, parseArgs, readExpectedWords, runFinalQa, runFinalQaSync, transcriptCheck,
+  finalQaChildArgs, findVoicedGaps, main, maybeRunFinalQa, parseArgs, readExpectedWords, runFinalQa, coverCheck, runFinalQaSync, transcriptCheck,
 };

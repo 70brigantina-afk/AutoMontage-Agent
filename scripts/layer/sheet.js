@@ -71,7 +71,7 @@ function parsePgm(buffer) {
 // градиент, сглаженный шум после сильного уменьшения – везде эта доля около нуля, это и есть «пусто»
 // для G12; читаемый текст или тестовая сетка дают заметную долю даже мелким шрифтом. null – кадр не
 // удалось декодировать (не значит «пусто» само по себе, но и не «всё хорошо» – решает emptyFrameGate).
-function frameEdgeShare(videoPath, timeSec) {
+function frameStats(videoPath, timeSec) {
   const result = spawnSync('ffmpeg', [...QUIET, '-ss', formatSeconds(timeSec), '-i', videoPath, '-frames:v', '1',
     '-vf', `scale=${EDGE_WIDTH}:-2,format=gray`, '-f', 'image2pipe', '-vcodec', 'pgm', '-'],
     { encoding: 'buffer', maxBuffer: 4 * 1024 * 1024, shell: false });
@@ -80,16 +80,24 @@ function frameEdgeShare(videoPath, timeSec) {
   if (!image || image.width < 2 || image.height < 2) return null;
   const { width, height, pixels } = image;
   let edges = 0;
+  let sum = 0;
   const total = (width - 1) * (height - 1);
-  for (let y = 0; y < height - 1; y += 1) {
+  for (let y = 0; y < height; y += 1) {
     const row = y * width;
     const nextRow = row + width;
-    for (let x = 0; x < width - 1; x += 1) {
+    for (let x = 0; x < width; x += 1) {
       const p = pixels[row + x];
-      if (Math.abs(pixels[row + x + 1] - p) > EDGE_THRESHOLD || Math.abs(pixels[nextRow + x] - p) > EDGE_THRESHOLD) edges += 1;
+      sum += p;
+      if (x < width - 1 && y < height - 1
+        && (Math.abs(pixels[row + x + 1] - p) > EDGE_THRESHOLD || Math.abs(pixels[nextRow + x] - p) > EDGE_THRESHOLD)) edges += 1;
     }
   }
-  return total > 0 ? edges / total : 0;
+  return { edgeShare: total > 0 ? edges / total : 0, meanLuma: sum / (width * height) };
+}
+
+function frameEdgeShare(videoPath, timeSec) {
+  const stats = frameStats(videoPath, timeSec);
+  return stats ? stats.edgeShare : null;
 }
 
 // Кадр с рамкой safe-зоны. Вызывающий код обязан заранее свести timeSec к [0, lastFrameSec]
@@ -186,4 +194,4 @@ async function run(options, deps = {}) {
   return 0;
 }
 
-module.exports = { FLAGS, buildSheet, frameEdgeShare, run, sheetTimes, thumbBox };
+module.exports = { FLAGS, buildSheet, frameEdgeShare, frameStats, run, sheetTimes, thumbBox };
