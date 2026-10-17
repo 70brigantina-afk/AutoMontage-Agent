@@ -194,12 +194,28 @@ test('regression: --music-only with --accept-provider-cost is rejected and the m
 
 test('regression: resume path never passes a dash-leading or backslash path to the shell unquoted', () => {
   const { resumeDir } = require('../scripts/motion/build');
-  const at = (relative) => path.join(process.cwd(), relative);
-  assert.equal(resumeDir(process.cwd()), '.');
-  assert.equal(resumeDir(at('projects/promo-1')), 'projects/promo-1');
-  assert.equal(resumeDir(at('-rf')), './-rf');
-  assert.equal(resumeDir(at('--music-only')), './--music-only');
-  assert.equal(resumeDir(at('a\\b')), "'a\\b'");
-  assert.equal(resumeDir(at("it's")), "'it'\\''s'");
-  assert.equal(resumeDir(at('-a b')), "'./-a b'");
+  const cwd = '/work/engine';
+  const at = (relative) => path.posix.join(cwd, relative);
+  const posix = (relative) => resumeDir(at(relative), { platform: 'darwin', cwd });
+  assert.equal(resumeDir(cwd, { platform: 'linux', cwd }), '.');
+  assert.equal(posix('projects/promo-1'), 'projects/promo-1');
+  assert.equal(posix('-rf'), './-rf');
+  assert.equal(posix('--music-only'), './--music-only');
+  assert.equal(posix('a\\b'), "'a\\b'");
+  assert.equal(posix("it's"), "'it'\\''s'");
+  assert.equal(posix('-a b'), "'./-a b'");
+});
+
+// #99: on Windows the hint was printed as 'projects\x' in single quotes, which cmd keeps literally.
+test('regression: resume path on Windows uses backslashes and double quotes for cmd/PowerShell', () => {
+  const { resumeDir } = require('../scripts/motion/build');
+  const cwd = 'C:\\Users\\me\\AutoMontage-Agent';
+  const win = (relative) => resumeDir(path.win32.join(cwd, relative), { platform: 'win32', cwd });
+  assert.equal(resumeDir(cwd, { platform: 'win32', cwd }), '.');
+  assert.equal(win('projects\\promo-1'), 'projects\\promo-1');
+  assert.equal(win('projects\\2026.10.17 Промо'), '"projects\\2026.10.17 Промо"');
+  assert.equal(win("projects\\it's"), '"projects\\it\'s"');
+  assert.equal(win('-rf'), '.\\-rf');
+  assert.equal(win('-a b'), '".\\-a b"');
+  assert.doesNotMatch(win('projects\\a b'), /'/);
 });

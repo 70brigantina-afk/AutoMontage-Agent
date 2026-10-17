@@ -135,6 +135,16 @@ automontage --help                  # все опции
   `AUTOMONTAGE_FFMPEG_DIR="$(brew --prefix ffmpeg-full)/bin"`.
 - **Windows** – ставь Node.js и Python с официальных сайтов (при установке Python отметь «Add to PATH»). ffmpeg: `winget install Gyan.FFmpeg`. Команда `automontage` появится автоматически (npm сам делает `.cmd`-обёртку). Временные файлы, пути и запуск – уже адаптированы под Windows.
 
+Если оболочка не находит команду `automontage` (не выполнен `npm install -g .`, или папка глобальных
+npm-пакетов не попала в PATH), запускай то же самое из корня движка через Node – аргументы
+те же:
+
+```bash
+node scripts/cli.js motion --project-dir projects/<id> --music-only
+node scripts/cli.js inbox
+```
+
+
 ### Подписка вместо API-ключей
 
 Обычный монтаж под ключ работает через твою подписку Claude Code или Codex. Агент локально
@@ -214,6 +224,8 @@ scaffold получает `audioRole: "music"` и одну сцену `kinetic-t
 Файл по-прежнему лежит в `input/narration.*`, но это мастер-звук ролика; поле `music` в таком
 brief запрещено – дополнительную музыку смешай в сам источник. Флаг несовместим с `--model`,
 `--brief`, `--version-label`, `--script`, `--voice`, `--voice-id`, `--accept-provider-cost`.
+Путь в подсказке ошибки напечатан под твою оболочку: на Windows – с `\` и в двойных
+кавычках, если в нём есть пробел, на macOS и Linux – в одинарных.
 Та же форма `--project-dir` продолжает папку после сбоя Whisper без `words.json`; проект, где в
 транскрипте уже есть речь, команда отклоняет. Preview, явное утверждение и final – те же команды,
 что выше; без браузера (например по SSH) preview запускается с `--no-open`.
