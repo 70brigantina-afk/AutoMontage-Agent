@@ -127,11 +127,12 @@ is empty» (CLI сам печатает её с путём проекта) ил�
   `withAudio=false` ровно на `durationInFrames` brief, подключение одной полноразмерной
   `media`-сценой (start 0, end = длительность, `fit: cover`, `audioMode: mute`,
   `frame: "full"` – клип на весь кадр без рамки и зума сцены) через
-  `publishBriefRevision`. Preview motion-reel гейты не запускает (D-038), поэтому QA такого
-  пакета – ручной: полный просмотр, safe zones, текст, синхронизация с треком;
+  `publishBriefRevision`. Технику preview (чёрные провалы, громкость, 48 кГц, кадр) проверяет
+  автоматический барьер motion-preview (D-049); остальной QA пакета – ручной: полный просмотр,
+  safe zones, текст, синхронизация с треком;
 - слой motion-kit (`automontage layer`) медиа-сценой по-прежнему не ставь.
 
-Дальше обычный путь: preview → ручной QA → явное «утверждаю» пользователя →
+Дальше обычный путь: preview (с автоматическим барьером) → ручной QA → явное «утверждаю» пользователя →
 `approve-brief --confirm-preview-viewed` → final. Генерацию AI-кадров, бюджет и provenance
 ведёт навык [ai-promo](../ai-promo/SKILL.md).
 
@@ -175,7 +176,11 @@ automontage review --project-dir projects/<id>
 ```
 
 Preview проходит через настоящий `MotionReel`, содержит watermark `ЧЕРНОВИК` и сохраняется
-только в `previews/`. Посмотри полный ролик, начало, steps, плотный текст, counter, media и CTA;
+только в `previews/`. Перед публикацией его меряет автоматический барьер motion-preview
+(`docs/MOTION-KIT.md`, D-049): чёрные провалы между сценами, громкость −14 ± 1 LUFS и true peak
+≤ −1,5 dBTP (на полном preview), одна дорожка 48 кГц, размер и FPS кадра. При ❌ preview не
+публикуется, прошлый остаётся, причина и способ исправления – в `qa/motion-preview-full.json`:
+исправь и собери preview заново, обхода нет. Посмотри полный ролик, начало, steps, плотный текст, counter, media и CTA;
 проверь читаемость, safe zones, звуковую синхронизацию, паузы и отсутствие обрезанных слов.
 Для Creative Motion также проверь отсутствие повторяющихся композиций, пустых чёрных переходов,
 обрезанных скриншотов и случайного системного шрифта.
@@ -218,8 +223,8 @@ approved-копия может попасть в `renders/` и `final/`; receipt
 Ролик только из озвучки без видео спикера собирается встроенным `MotionReel`, как раньше.
 Kit нужен, когда в кадре есть аватар или спикер: такой ролик веди по
 `skills/reel-turnkey/SKILL.md` и подключай слой через `automontage layer brief`. Не ставь слой
-kit media-сценой motion brief: preview motion-reel барьер гейтов не проверяет (известный
-пробел, D-038 в `DECISIONS.md`).
+kit media-сценой motion brief: preview motion-reel проходит только технический барьер
+motion-preview (D-049), а гейты L и G8 слоя kit – нет (D-038 в `DECISIONS.md`).
 
 Пути – от корня движка; весь путь, команды и гейты – `docs/MOTION-KIT.md`.
 

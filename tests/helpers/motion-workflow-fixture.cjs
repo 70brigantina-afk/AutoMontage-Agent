@@ -33,6 +33,12 @@ function fakeMedia(calls = []) {
     },
     resolveRemotionCommandImpl() { return { command: 'remotion', argsPrefix: [] }; },
     probeVideoImpl() { return { width: 320, height: 568, fps: 30, duration: 2 }; },
+    // Файлы fakeMedia – текст, а не MP4: настоящий барьер motion-preview проверяют отдельные тесты
+    // через captureImpl с выводом ffmpeg (tests/motion-workflow.test.js, tests/qa-motion-preview-gates.test.js).
+    runMotionPreviewGatesImpl(input) {
+      calls.push({ stage: 'motion preview gates', input });
+      return { checks: [], block: false, reportPath: null, writeError: null };
+    },
   };
 }
 module.exports = { fixture, sha, fakeMedia };

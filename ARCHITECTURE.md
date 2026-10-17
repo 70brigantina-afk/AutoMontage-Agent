@@ -263,6 +263,13 @@ Draft имеет отдельную непередаваемую в final воз
 тот же масштаб через `previewScale`, а хеши и подтверждение просмотра остаются обязательными.
 Перед decode и публикацией lesson-preview проходит барьер `scripts/qa/preview-gates.js`
 (гейт L и G8, раздел 3.5): стоп строг только для слоя kit из реестра `qa/layer-imports.json`.
+Motion-reel preview вместо него проходит барьер `scripts/qa/motion-preview-gates.js` (D-049):
+ffprobe собранного файла (размер и FPS, ровно одна дорожка 48 кГц) и один проход ffmpeg с
+`blackdetect` и, только у полного preview, `ebur128` (−14 ± 1 LUFS, true peak ≤ −1,5 dBTP).
+Отчёт – `qa/motion-preview-<label>.json`; любой `fail` или незаписанный отчёт – preview не
+публикуется, прошлый остаётся. `mix-music.js` после смешивания повторяет `LOUDNORM_FILTER` из
+`finish-audio.js` и выводит 48 кГц; граф баланса до loudnorm (`buildMusicFilter`) – тот же, что
+меряет G8.
 
 Preview не имеет отдельного HTML- или FFmpeg-дизайна: такие имитации могли бы показать не тот
 монтаж, который затем соберёт final. И preview, и final используют одну соответствующую kind композицию,
@@ -326,7 +333,8 @@ Remotion-слой такого ролика рендерится без звук
 `publishBriefRevision`. Optional `media.frame` у video – `card` (по умолчанию, клип в карточке
 сцены) или `full`: клип на весь кадр 1080×1920 без `SceneFrame` и зума, без `overlayText` и
 `caption`. Звук preview кодируется в 48 кГц.
-Барьер гейтов motion-reel preview не проходит (D-038), поэтому QA ручной. Маршрут ведёт навык
+Гейтов L и G8 motion-reel preview не проходит (D-038); техническую часть (чёрные провалы,
+громкость, 48 кГц, кадр) проверяет барьер motion-preview (D-049), остальной QA ручной. Маршрут ведёт навык
 `skills/ai-promo/` (adapters в `.agents/`, `.claude/`, `.codex/`): генерация кадров и клипов
 идёт в агентской сессии через MCP провайдера (сейчас Higgsfield), а в движок попадают только
 локальные файлы проекта с SHA-256 и `provenance.json` (D-048).
