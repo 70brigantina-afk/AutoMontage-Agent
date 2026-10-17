@@ -62,9 +62,28 @@ test('the normal preview/final graph stays byte-identical', () => {
   );
   assert.deepEqual(mixMusicCommand('voice.mp4', 'music.mp3', 'out.mp4', 'GRAPH').args, [
     '-y', '-i', path.resolve('voice.mp4'), '-stream_loop', '-1', '-i', path.resolve('music.mp3'),
-    '-filter_complex', 'GRAPH', '-map', '0:v', '-map', '[aout]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k',
+    '-filter_complex', 'GRAPH', '-map', '0:v', '-map', '[aout]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', '-ar', '48000',
     '-shortest', '-movflags', '+faststart', path.resolve('out.mp4'),
   ]);
+});
+
+// Регрессия #43: микс писал 44,1 кГц и не нормализовал громкость после того, как музыка ложилась под
+// голос, – motion-preview с музыкой выходил громче −14 LUFS и не 48 кГц. Проверяем настоящие argv ffmpeg.
+test('mix-music output re-applies the finish loudnorm after mixing and writes 48 kHz', () => {
+  const { LOUDNORM_FILTER } = require('../scripts/finish-audio');
+  const { main } = require('../scripts/mix-music');
+  const calls = [];
+  main(['voice.mp4', 'music.mp3', 'out.mp4', ...BRIEF_ARGS], { runToolImpl: (command, args, options) => calls.push({ command, args, options }), log() {} });
+  assert.equal(calls.length, 1);
+  const { args } = calls[0];
+  const graph = args[args.indexOf('-filter_complex') + 1];
+  assert.equal(LOUDNORM_FILTER, 'loudnorm=I=-14:TP=-1.5:LRA=11');
+  assert.ok(graph.endsWith(`amix=inputs=2:duration=first:normalize=0,${LOUDNORM_FILTER},aformat=sample_rates=48000:channel_layouts=stereo,apad[aout]`), graph);
+  // Баланс внутри графа – 44,1 кГц (как меряет G8), но после loudnorm выход приводится к 48 кГц.
+  assert.equal(graph.split('loudnorm')[1].includes('44100'), false);
+  assert.equal(args[args.indexOf('-ar') + 1], '48000');
+  // До loudnorm граф – ровно граф баланса, который меряет G8.
+  assert.ok(graph.startsWith(buildMusicFilter(parseMixOptions(BRIEF_ARGS)).replace(/apad\[aout\]$/, '')));
 });
 
 test('the music stem reuses the exact music chain and sidechain of the preview graph', () => {
@@ -126,7 +145,8 @@ test('K weighting reproduces ffmpeg ebur128 across the band', { skip: !hasFfmpeg
 });
 
 // Главное обещание замера: музыка в нём – ровно то, что микс preview прибавляет к голосу, с ducking
-// и зацикленной музыкой. Настоящая команда mix-music, только звук без потерь (PCM в MOV вместо AAC),
+// и зацикленной музыкой. Настоящая команда mix-music с графом баланса buildMusicFilter (mix-music.js после
+// него дописывает только общий loudnorm и выход 48 кГц – buildMixFilter, #43), только звук без потерь (PCM в MOV вместо AAC),
 // чтобы сравнить по сэмплам: микс = голос + музыка замера (K-взвешивание линейно). Замер всегда ровно
 // durationSec × 48000 кадров. Сам файл микса у ffmpeg 6 и 7 на 273 кадра короче: -shortest в их
 // муксере обрезает звук чуть раньше конца видео (у ffmpeg 8+ – ровно по концу). Это хвост файла

@@ -5,6 +5,7 @@ const path = require('node:path');
 const { fixture, sha, fakeMedia } = require('./helpers/motion-workflow-fixture.cjs');
 const { runMotion, parseMotionOptions } = require('../scripts/motion/build');
 const { runPreview } = require('../scripts/preview');
+const { runMotionPreviewGates } = require('../scripts/qa/motion-preview-gates');
 const { approveBrief, readProjectManifest } = require('../scripts/project/workspace');
 const { buildReelScenesProps } = require('../scripts/lesson/brief');
 const { buildMotionProps } = require('../scripts/motion/brief');
@@ -18,11 +19,79 @@ function approve(f) {
 function final(f, approved, dependencies = {}) {
   return runMotion({ projectDir: f.workspace.dir, briefPath: approved.jsonPath, versionLabel: 'reviewed' }, { ...fakeMedia(), probeVideoImpl: () => ({ width: 320, height: 568, fps: 30, duration: 2 }), ...dependencies });
 }
-test('motion-reel preview does not run the preview gates barrier', (t) => {
-  const f = fixture(t);
-  const result = preview(f, { runPreviewGatesImpl: () => { throw new Error('motion-reel не должен звать барьер'); } });
+test('motion-reel preview skips the lesson gates but runs its own motion barrier before publication', (t) => {
+  const f = fixture(t); const calls = [];
+  const result = preview(f, { ...fakeMedia(calls), runPreviewGatesImpl: () => { throw new Error('motion-reel не должен звать барьер lesson'); } });
   assert.equal(result.metadata.kind, 'full');
-  assert.equal(fs.existsSync(path.join(f.workspace.dir, 'qa')), false);
+  const gates = calls.filter(call => call.stage === 'motion preview gates');
+  assert.equal(gates.length, 1);
+  assert.deepEqual(gates[0].input.expected, { width: 320, height: 568, fps: 30, totalSec: 2 });
+  assert.equal(gates[0].input.range.kind, 'full');
+  assert.match(gates[0].input.videoPath, /\.mp4$/);
+  // Барьер видит собранный файл до публикации и до полного декодирования.
+  const order = calls.map(call => call.stage);
+  assert.ok(order.indexOf('motion preview gates') < order.indexOf('preview decode'));
+});
+
+// Настоящий барьер с подменённым выводом ffprobe/ffmpeg: файлы fakeMedia – текст, а не MP4.
+const BLACK = '[blackdetect @ 0x1] black_start:0.8 black_end:1.2 black_duration:0.4\n';
+const summary = (lufs, peak) => `[Parsed_ebur128_0 @ 0x2] Summary:\n\n  Integrated loudness:\n    I:         ${lufs} LUFS\n    Threshold: -24.0 LUFS\n\n`
+  + `  Loudness range:\n    LRA:         5.0 LU\n\n  True peak:\n    Peak:      ${peak} dBFS\n`;
+function realGates({ rate = 48000, stderr = summary('-14.1', '-1.7') } = {}, seen = []) {
+  return {
+    runMotionPreviewGatesImpl(input, deps) {
+      return runMotionPreviewGates(input, { ...deps, captureImpl(command, args) {
+        seen.push({ command, args });
+        if (command === 'ffprobe') {
+          return { stdout: JSON.stringify({ streams: [
+            { codec_type: 'video', width: input.expected.width, height: input.expected.height, avg_frame_rate: '30/1', duration: '2.000000' },
+            { codec_type: 'audio', sample_rate: String(rate), duration: '2.000000' }], format: { duration: '2.000000' } }), stderr: '' };
+        }
+        return { stdout: '', stderr };
+      } });
+    },
+  };
+}
+function currentPreview(f) {
+  return { manifest: readProjectManifest(f.workspace.dir).currentPreview, bytes: fs.readFileSync(path.join(f.workspace.dir, 'previews/current-preview.mp4')) };
+}
+test('motion barrier: a clean preview is published and its report is written to qa/', (t) => {
+  const f = fixture(t); const seen = [];
+  const result = preview(f, realGates({}, seen));
+  assert.equal(result.metadata.kind, 'full');
+  assert.ok(seen.find(call => call.command === 'ffmpeg').args.some(arg => arg.startsWith('ebur128')));
+  const report = JSON.parse(fs.readFileSync(path.join(f.workspace.dir, 'qa/motion-preview-full.json'), 'utf8'));
+  assert.equal(report.block, false);
+  assert.ok(report.checks.every(item => item.status === 'pass'));
+});
+for (const [name, gates, id, pattern] of [
+  ['a black gap between scenes', { stderr: BLACK + summary('-14.0', '-1.8') }, 'black-frames', /0,8–1,2 с/],
+  ['integrated loudness out of −14 ±1 LUFS', { stderr: summary('-17.3', '-4.0') }, 'loudness-integrated', /-17,3|−17,3/],
+  ['a 44100 Hz soundtrack', { rate: 44100 }, 'sample-rate', /44100/],
+]) {
+  test(`motion barrier: ${name} blocks publication and keeps the previous preview`, (t) => {
+    const f = fixture(t); preview(f); const before = currentPreview(f);
+    assert.throws(() => preview(f, realGates(gates)), /preview не опубликован: проверки motion не пройдены \(qa\/motion-preview-full\.json\)/);
+    const after = currentPreview(f);
+    assert.deepEqual(after.manifest, before.manifest);
+    assert.deepEqual(after.bytes, before.bytes);
+    const report = JSON.parse(fs.readFileSync(path.join(f.workspace.dir, 'qa/motion-preview-full.json'), 'utf8'));
+    const failed = report.checks.find(item => item.id === id);
+    assert.equal(report.block, true);
+    assert.equal(failed.status, 'fail');
+    assert.match(failed.message, pattern);
+    assert.equal(fs.readdirSync(path.join(f.workspace.dir, 'previews')).filter(name => name.includes('.tmp')).length, 0);
+  });
+}
+test('motion barrier: a partial-range preview skips loudness but still publishes after other checks', (t) => {
+  const f = fixture(t); const seen = [];
+  const result = runPreview({ projectDir: f.workspace.dir, briefPath: f.published.relativePath, fromSec: 0.5, toSec: 1.5, open: false },
+    { ...fakeMedia(), ...realGates({ stderr: summary('-30.0', '-20.0') }, seen), probeVideoImpl: () => ({ width: 320, height: 568, fps: 30, duration: 1 }) });
+  assert.equal(result.metadata.kind, 'excerpt');
+  assert.equal(seen.find(call => call.command === 'ffmpeg').args.some(arg => arg.startsWith('ebur128')), false);
+  const report = JSON.parse(fs.readFileSync(path.join(f.workspace.dir, 'qa/motion-preview-excerpt-500-1500.json'), 'utf8'));
+  assert.deepEqual(report.checks.filter(item => item.status === 'skipped').map(item => item.id), ['loudness-integrated', 'true-peak']);
+  assert.equal(report.block, false);
 });
 test('motion option parser separates audio initialization from approved continuation', () => {
   assert.equal(parseMotionOptions(['voice.wav', '--project', 'Reel']).narrationPath, 'voice.wav');

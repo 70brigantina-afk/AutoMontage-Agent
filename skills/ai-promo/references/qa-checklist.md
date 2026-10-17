@@ -1,8 +1,15 @@
 # QA AI-промо
 
-Preview motion-reel не запускает автоматических гейтов вовсе (D-038), поэтому проверку делает агент: цифрами,
-глазами и на слух. Проверяй пакет перед brief, затем preview, затем final. Результаты пиши в
-`projects/<id>/qa/`.
+Техническую часть preview движок проверяет сам: `automontage preview` перед публикацией меряет
+собранный файл барьером motion-preview (D-049, `docs/MOTION-KIT.md`) – `blackdetect=d=0.1:pix_th=0.10:pic_th=0.999`
+(полностью чёрный кадр между сценами – стоп; появление из темноты до 1 с в начале, затемнение до 1,5 с в самом конце и тёмные сцены с небольшим светлым элементом – нет), `ebur128` (−14 ± 1 LUFS,
+true peak ≤ −1,5 dBTP; только на полном preview, у фрагмента громкость `skipped`), ровно одна
+звуковая дорожка 48000 Гц, размер и FPS кадра. При ❌ preview не публикуется, прошлый остаётся;
+отчёт с причиной и способом исправления – `projects/<id>/qa/motion-preview-full.json`. Флага обхода
+нет: исправь причину и собери preview заново.
+
+Всё, что ниже, – то, чего автоматика не видит или что нужно до и после preview: пакет перед brief,
+глаза и слух на preview, затем final. Результаты пиши в `projects/<id>/qa/`.
 
 ## Формат
 
@@ -12,7 +19,7 @@ ffprobe -v error -show_entries stream=codec_type,codec_name,width,height,r_frame
 
 - Пакет: 1080×1920, 30/1 FPS, число кадров = `durationInFrames` brief, звуковой дорожки нет.
 - Preview и final: 1080×1920, 30 FPS, H.264 + AAC, один аудиопоток `sample_rate` = 48000,
-  длительность = brief.
+  длительность = brief. У preview это уже проверил барьер; ffprobe нужен для пакета и final.
 - Саундтрек проекта (`input/narration.wav`): `sample_rate` = 48000, `duration_ts` = кадры × 1600
   ([audio-recipe.md](audio-recipe.md)).
 
@@ -20,12 +27,13 @@ ffprobe -v error -show_entries stream=codec_type,codec_name,width,height,r_frame
 
 ```bash
 ffmpeg -hide_banner -i <файл>.mp4 -vf "fps=1,scale=216:-1,tile=6x5" -frames:v 1 qa/contact-sheet.png
-ffmpeg -hide_banner -i <файл>.mp4 -vf "blackdetect=d=0.1:pix_th=0.10" -an -f null - 2>&1 | grep blackdetect
+ffmpeg -hide_banner -i <файл>.mp4 -vf "blackdetect=d=0.1:pix_th=0.10:pic_th=0.999" -an -f null - 2>&1 | grep blackdetect
 ```
 
 - Контакт-лист: кадр в секунду, сетка 6×5 покрывает ролик до 30 с; для более длинного добавь
   строк (`tile=6xN`, N = секунды ÷ 6 с округлением вверх). Все сцены на месте, нет повторяющихся композиций, текст не обрезан, safe zone.
-- `blackdetect` пуст: ни одного чёрного провала между сценами (кроме задуманного конца).
+- `blackdetect` пуст: ни одного чёрного провала между сценами (кроме появления из темноты до 1 с в начале и задуманного конца). У preview
+  это проверка барьера; вручную – у пакета и final.
 - Просмотри весь ролик: лица без искажений, руки, отсутствие сгенерированных букв и знаков.
 - Нет водяных знаков провайдера и стоков; в final нет watermark `ЧЕРНОВИК`.
 - Надписи совпадают с согласованной копией дословно.
@@ -36,9 +44,10 @@ ffmpeg -hide_banner -i <файл>.mp4 -vf "blackdetect=d=0.1:pix_th=0.10" -an -f
 ffmpeg -hide_banner -i <файл>.mp4 -af ebur128=peak=true -f null - 2>&1 | tail -14
 ```
 
-- Интегральная громкость −14 ± 1 LUFS, true peak ≤ −1,5 dBTP – только по `ebur128`.
-  `node scripts/qa-preview.js` печатает `soundtrack mean <x> dB`: это `mean_volume` источника,
-  средний уровень в dBFS, а не LUFS; с −14 его не сравнивай.
+- Интегральная громкость −14 ± 1 LUFS, true peak ≤ −1,5 dBTP – только по `ebur128`. У полного
+  preview это меряет барьер; вручную – у саундтрека до preview и у final.
+  `node scripts/qa-preview.js` по-прежнему печатает `soundtrack mean <x> dB`: это `mean_volume`
+  источника, средний уровень в dBFS, а не LUFS; с −14 его не сравнивай.
 - Синхрон: удар на старте, дроп точно на первом большом кадре, финальный удар и конец трека
   совпадают с кадрами. Проверь кадрами вокруг каждой точки: `<t>` – секунда склейки или удара
   из `PLAN` пакета (кадр ÷ 30) минус 0,1 с:

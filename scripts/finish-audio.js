@@ -13,6 +13,7 @@ function buildFinishAudioFilter(audioAdvanceMs = 0) {
 }
 
 module.exports = {
+  LOUDNORM_FILTER,
   REMOTION_AUDIO_ADVANCE_MS,
   buildFinishAudioFilter,
 };

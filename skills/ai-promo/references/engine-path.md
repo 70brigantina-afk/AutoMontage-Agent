@@ -119,8 +119,10 @@ node scripts/qa-preview.js --project-dir projects/<id>
 `qa-preview` печатает `soundtrack mean <x> dB` – это `mean_volume` источника, а не LUFS;
 громкость в LUFS меряй `ebur128` по [qa-checklist.md](qa-checklist.md). Звук preview – 48 кГц.
 
-Preview motion-reel не запускает автоматических гейтов вовсе (D-038): полный ручной QA по
-[qa-checklist.md](qa-checklist.md). Покажи preview пользователю и напомни про `automontage pult`.
+Перед публикацией preview проходит автоматический барьер motion-preview (D-049): чёрные провалы,
+громкость −14 ± 1 LUFS и true peak ≤ −1,5 dBTP (на полном preview), одна дорожка 48 кГц, размер
+и FPS. При ❌ preview не публикуется, прошлый остаётся; причина – в `qa/motion-preview-full.json`.
+Остальное – ручной QA по [qa-checklist.md](qa-checklist.md). Покажи preview пользователю и напомни про `automontage pult`.
 
 ## 6. Утверждение и final
 

@@ -710,6 +710,7 @@ Chromium и полного FFmpeg; перед завершением renderer-з
 
 ```bash
 node --test tests/motion-workflow.test.js tests/review-compatibility.test.js tests/qa-preview.test.js tests/cli.test.js
+node --test tests/qa-motion-preview-gates.test.js tests/music-ducking.test.js tests/qa-mix-gates.test.js
 node --test tests/motion-workspace-privacy.test.js tests/motion-media-preflight.test.js
 AUTOMONTAGE_TEST_MOTION_WORKFLOW=1 node --test tests/motion-workflow-media.test.js
 ```
@@ -731,6 +732,15 @@ approved brief; короткие клипы и явные silent `mix`/`replace`
 Регрессии гонок проверяют narration A→B→A при копировании preview и поздние правки approved/draft
 во время последнего narration hash, fsync MP4, rename MP4 и fsync manifest. При отказе сохраняются
 прежний final и `latestRender`, а созданные staging/backup-файлы удаляются.
+Барьер motion-preview (D-049) проверяют `qa-motion-preview-gates.test.js` – парсеры настоящего
+stderr ffmpeg (`blackdetect`, итог `ebur128`) и JSON ffprobe, вердикт каждой проверки, хвостовое
+затемнение как исключение, `skipped` громкости у фрагмента, запись `qa/motion-preview-<label>.json`,
+`qa/` как ссылка и настоящий ffmpeg на синтетическом ролике с чёрной дырой и звуком 44,1 кГц – и
+`motion-workflow.test.js`: чистый preview публикуется и пишет отчёт, чёрная дыра, громкость вне
+−14 ± 1 LUFS и 44 100 Гц останавливают публикацию и оставляют прошлый preview, фрагмент
+пропускает громкость. `music-ducking.test.js` и `qa-mix-gates.test.js` закрепляют, что
+`mix-music.js` после микса повторяет `loudnorm` финиша и пишет 48 кГц (настоящий микс громкой
+музыки остаётся в −14 ± 1 LUFS).
 Motion Review дополнительно проверяется через настоящий HTTP server: audio MIME, безопасный
 state и отказ от неподдержанных edit-команд. Legacy lesson tests остаются обязательными.
 
@@ -757,19 +767,19 @@ frontmatter, adapters в `.agents/`, `.claude/`, `.codex/`, ссылки на re
 правила бюджета кредитов, согласия на внешность и отсутствие токенов, личных путей и CDN-ссылок.
 
 Project-local пакет такого ролика подключается одной `media`-сценой с `frame: "full"`.
-Гейты к preview ролика без речи не применяются (см. `docs/MOTION-KIT.md`), поэтому перед
-показом пользователю агент вручную проверяет `previews/current-preview.mp4` по
-[чек-листу ai-promo](skills/ai-promo/references/qa-checklist.md):
+Гейты L и G8 к preview ролика без речи не применяются, но его, как любой motion-reel preview,
+перед публикацией меряет автоматический барьер motion-preview (см. `docs/MOTION-KIT.md`, D-049):
 
 ```bash
-ffprobe -v error -show_streams -show_format -of json previews/current-preview.mp4
-ffmpeg -v info -i previews/current-preview.mp4 -vf blackdetect=d=0.1:pix_th=0.10 -an -f null -
-ffmpeg -v info -i previews/current-preview.mp4 -af ebur128=peak=true -f null -
+ffprobe -v error -show_entries stream=codec_type,width,height,avg_frame_rate,r_frame_rate,sample_rate,duration:format=duration -of json <preview>
+ffmpeg -hide_banner -nostats -v info -i <preview> -map 0:v:0 -vf blackdetect=d=0.1:pix_th=0.10:pic_th=0.999 -map 0:a:0 -af ebur128=peak=true:framelog=verbose -f null -
 ```
 
-Ожидание: H.264/AAC, геометрия и FPS brief, длительность равна саундтреку, один аудиопоток
-48000 Гц;
-нет чёрных кадров вне задуманных; Integrated −14 ± 1 LUFS, True Peak ≤ −1,5 dBTP. Контактный
+Порог: геометрия и FPS preview, ровно один аудиопоток 48000 Гц; нет полностью чёрных кадров, кроме
+появления из темноты до 1 с в начале и затемнения до 1,5 с в самом конце; Integrated −14 ± 1 LUFS, True Peak ≤ −1,5 dBTP (только на
+полном preview). Любой ❌ – preview не опубликован, отчёт в `qa/motion-preview-full.json`.
+Вручную по [чек-листу ai-promo](skills/ai-promo/references/qa-checklist.md) остаются final
+(те же ffprobe, `blackdetect=d=0.1:pix_th=0.10:pic_th=0.999` и `ebur128`) и всё, что видно только глазами. Контактный
 лист (кадр в секунду: `-vf fps=1,scale=216:-1,tile=6x5` покрывает 30 с) просматривается целиком:
 текст в safe-zone, нет артефактов генерации и чужих логотипов. Final после утверждения
 проверяется так же. Строка `soundtrack mean <x> dB` из `node scripts/qa-preview.js` – это
@@ -1034,7 +1044,8 @@ Pexels подменён. `tests/qa-preview.test.js` в той же маске �
 уровне голоса, проваленный или правленный руками отчёт рендера, слой для другого исходника,
 битый реестр, `qa/` как ссылка, один плохой слой из двух) и `lesson-preview.test.js` (стоп
 оставляет прошлый preview, незаписанный отчёт останавливает только preview слоя kit).
-`motion-workflow.test.js` закрепляет известный пробел: motion-reel барьер не вызывает.
+`motion-workflow.test.js` закрепляет, что motion-reel не вызывает этот барьер lesson, а проходит
+свой барьер motion-preview (D-049) до полного decode и публикации.
 
 Настоящий Remotion-рендер kit и кадры шаблона – по флагу и **только из корня движка**
 (Remotion ищет скачанный браузер в `node_modules/.remotion` рядом с ближайшим `package.json` выше
