@@ -443,3 +443,12 @@ test('automontage clean is dispatched by the main CLI and only reports by defaul
   assert.match(output, /Можно освободить:/);
   assert.ok(fs.existsSync(path.join(projects, 'a', 'tmp', 'a.wav')));
 });
+
+// CI 1.15.0: mtime файла бывает на миллисекунду позже Date.now() (часы ядра и ФС идут с разной
+// точностью) – Math.floor давал −1 дн., и при minAgeDays 0 готовый проект считался «свежим».
+test('regression: a file timestamp slightly ahead of now is age 0, not negative', (t) => {
+  const { dir } = finishedProject(t);
+  const changed = fs.statSync(path.join(dir, 'project.json')).mtimeMs;
+  const plan = planProjectCleanup(dir, { minAgeDays: 0, now: new Date(changed - 5) });
+  assert.equal(plan.status, 'eligible');
+});
