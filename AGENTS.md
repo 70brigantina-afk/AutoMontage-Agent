@@ -157,7 +157,8 @@ b-roll, музыкой и финишной обработкой через ffmpe
 и после «режь сам» его нет) и явное утверждение просмотренного preview перед final.
 
 Полный контракт выбора, автономности, уникального дизайна и QA находится в
-`skills/reel-turnkey/references/creative-motion.md`, порядок черновой нарезки – в
+`skills/reel-turnkey/references/creative-motion.md`, числа и запреты движения – в
+[`skills/reel-turnkey/references/motion-craft.md`](skills/reel-turnkey/references/motion-craft.md), порядок черновой нарезки – в
 `skills/reel-turnkey/references/rough-cut.md`. Навыки `reel-turnkey`, `reel-from-donor` и
 `motion-reel` обязаны применять их в своих маршрутах.
 

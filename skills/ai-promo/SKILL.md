@@ -24,6 +24,7 @@ OAuth MCP пользователя, остальное работает лока
 ## Сначала выбери маршрут
 
 Прочитай [`reel-turnkey/references/creative-motion.md`](../reel-turnkey/references/creative-motion.md).
+Прочитай [`reel-turnkey/references/motion-craft.md`](../reel-turnkey/references/motion-craft.md) – числа и запреты движения.
 Если пользователь ещё не выбрал способ оформления, покажи карточку **«Как монтируем?»** с тремя
 вариантами из контракта (Creative Motion рекомендуется, готовый стиль, по референсу). AI-промо –
 это маршрут исполнения, а не четвёртый вариант карточки: по умолчанию он идёт как Creative Motion,

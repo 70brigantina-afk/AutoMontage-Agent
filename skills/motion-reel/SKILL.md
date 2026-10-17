@@ -19,6 +19,7 @@ OpenAI/Anthropic API для сценария, режиссуры или монт
 ## Сначала покажи выбор монтажа
 
 Прочитай [`reel-turnkey/references/creative-motion.md`](../reel-turnkey/references/creative-motion.md).
+Прочитай [`reel-turnkey/references/motion-craft.md`](../reel-turnkey/references/motion-craft.md) – числа и запреты движения.
 Если пользователь ещё не выбрал маршрут, сразу покажи карточку **«Как монтируем?»**:
 уникальный Creative Motion (рекомендуется), готовый установленный стиль или монтаж по
 референсу. При явном выборе не спрашивай снова; «реши сам» означает Creative Motion. После
