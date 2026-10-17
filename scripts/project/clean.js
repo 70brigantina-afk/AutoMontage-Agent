@@ -195,8 +195,9 @@ function planProjectCleanup(projectDir, { level = 'renders', minAgeDays = 3, now
   if (!finalStat?.isFile() || finalStat.size === 0) return skipped(projectDir, 'нет финала');
   if (fileSystem.existsSync(path.join(projectDir, MUTATION_LOCK))) return skipped(projectDir, 'идёт работа (lock)');
   const changed = Math.max(fileSystem.statSync(manifestPath).mtimeMs, finalStat.mtimeMs);
-  const ageDays = Math.floor((now.getTime() - changed) / DAY_MS);
-  if (ageDays < minAgeDays) return skipped(projectDir, `менялся ${Math.max(0, ageDays)} дн. назад`);
+  // Отметка ФС может опережать now на миллисекунды – отрицательный возраст считаем нулевым.
+  const ageDays = Math.max(0, Math.floor((now.getTime() - changed) / DAY_MS));
+  if (ageDays < minAgeDays) return skipped(projectDir, `менялся ${ageDays} дн. назад`);
   const blocker = pultBlocker(projectDir, manifest);
   if (blocker) return skipped(projectDir, blocker);
 
