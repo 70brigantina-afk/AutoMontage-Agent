@@ -21,6 +21,16 @@
 1080×1920/30 и фактическую длительность `ceil(audioDurationSec * fps)` в кадрах.
 У каждого scene только разрешённые схемой свойства; все поля проверяются строго.
 
+Необязательное `audioRole: "narration" | "music"` задаёт роль исходного аудио. Без поля –
+`narration` (речь, старые brief не меняются). `music` – ролик без речи: источник – готовый
+саундтрек и мастер-аудио, `transcript/words.json` пустой, блок `music` запрещён. Markdown
+такой ревизии пишет строку `Аудио: музыка без речи (источник – саундтрек)`.
+
+Если Whisper вернул пустой транскрипт, обычный путь останавливается ошибкой и печатает
+команду продолжения для ролика без голоса:
+`automontage motion --project-dir projects/<id> --music-only`. Проект уже создан, новый
+заводить не нужно; та же команда продолжает проект после сбоя Whisper без `words.json`.
+
 | ID | Поля помимо `start`, `end` и optional `caption` |
 |---|---|
 | `kinetic-title` | `text` ≤120, optional `emphasis` ≤40 |
@@ -33,7 +43,9 @@
 
 Optional `caption` ≤160. Верхние ограничения не цель: оставляй время на чтение.
 `media.kind` – `image` или `video`; `fit` – `contain` или `cover`. У video допустимы
-`trimStartSec` (frame-aligned) и `audioMode: mute|mix|replace`. Начало клипа локальное,
+`trimStartSec` (frame-aligned), `audioMode: mute|mix|replace` и `frame: card|full` (без поля –
+`card`: клип в карточке сцены; `full` – на весь кадр без рамки и зума, без `overlayText` и
+`caption`; так подключается полноразмерный project-local пакет). Начало клипа локальное,
 начало scene глобальное; источник озвучки не запускается заново на каждой сцене.
 Файлы и их hashes проверяются при preview/approval/final. HTML, CSS, код и удалённые URL
 не являются средством настройки сцены. Числа и цитаты не выдумывай.

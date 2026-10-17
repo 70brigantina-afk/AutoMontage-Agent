@@ -308,6 +308,29 @@ Scheduling и автопубликация – будущая отдельная
 `cache:pipe:0` с `read_ahead_limit=-1`, чтобы определять длительность обычных WAV/MP3 больше
 64 KiB; timeout ограничен 30 секундами.
 
+Ветка `--music-only` в `scripts/motion/build.js` создаёт ролик без речи. Источник – готовый
+смешанный саундтрек; manifest не меняется (файл остаётся `input/narration.<ext>` и служит
+мастер-звуком). Whisper не вызывается, `transcript/words.json` равен `[]`, scaffold получает
+`audioRole: "music"` и одну сцену `kinetic-title` с `manifest.name`. Форма
+`--project-dir <dir> --music-only` продолжает уже созданную папку: если речевой маршрут получил
+пустую расшифровку, папка остаётся в возобновляемом состоянии, а ошибка печатает точную команду
+продолжения (рекурсивного отката нет); так же продолжается папка после сбоя Whisper без
+`words.json`, а папка с непустой расшифровкой речи отклоняется. Флаг несовместим с `--model`,
+`--brief`, `--version-label`, `--script`, `--voice`, `--voice-id`, `--accept-provider-cost`. Preview, `approveBrief`, проверка
+approval и final от речи не зависят и работают без изменений.
+
+Optional поле motion brief `audioRole` равно `narration` (по умолчанию) или `music`. При `music`
+поле `brief.music` отклоняется: дополнительная музыка смешивается в источник. Project-local
+Remotion-слой такого ролика рендерится без звука ровно на `durationInFrames` и подключается
+одной `media`-сценой на всю длину (`fit: cover`, `audioMode: mute`, `frame: "full"`) через
+`publishBriefRevision`. Optional `media.frame` у video – `card` (по умолчанию, клип в карточке
+сцены) или `full`: клип на весь кадр 1080×1920 без `SceneFrame` и зума, без `overlayText` и
+`caption`. Звук preview кодируется в 48 кГц.
+Барьер гейтов motion-reel preview не проходит (D-038), поэтому QA ручной. Маршрут ведёт навык
+`skills/ai-promo/` (adapters в `.agents/`, `.claude/`, `.codex/`): генерация кадров и клипов
+идёт в агентской сессии через MCP провайдера (сейчас Higgsfield), а в движок попадают только
+локальные файлы проекта с SHA-256 и `provenance.json` (D-048).
+
 Общий `scripts/project/private-workspace.js` защищает все motion workspaces: локальный звук,
 демо, TTS и возобновляемый preview/final. До первой записи source/manifest сохраняются новая
 цепочка каталогов и локальный `.gitignore` с последним правилом `*`; существующие bytes правил

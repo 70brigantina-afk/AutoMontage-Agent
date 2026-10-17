@@ -281,11 +281,19 @@ function runPreview(options, dependencies = {}) {
       fps: probe.fps,
       generatedAt,
     }, { fileSystem, temporaryId });
-    if (options.open !== false) openMediaFileImpl(published.currentPath);
+    if (options.open !== false) {
+      // The preview is already saved and registered: a browser failure is a warning, not a cancel.
+      try { openMediaFileImpl(published.currentPath); } catch (error) { return { ...published, openError: error.message }; }
+    }
     return published;
   } finally {
     try { cleanupPreviewStages(stages, fileSystem); } finally { slot.release(); }
   }
+}
+
+function previewOpenWarning(currentPath) {
+  return `⚠️ preview сохранён, но системный браузер не открылся: ${currentPath}. Открой файл вручную; `
+    + 'в среде без браузера запускай preview с --no-open';
 }
 
 function main(argv = process.argv.slice(2)) {
@@ -297,6 +305,7 @@ function main(argv = process.argv.slice(2)) {
       : `ФРАГМЕНТ ${result.metadata.fromSec.toFixed(2)}–${result.metadata.toSec.toFixed(2)} сек`;
     console.log(`✅ СМОНТИРОВАННЫЙ ПРЕДПРОСМОТР: ${result.currentPath}`);
     console.log(`   ${label}`);
+    if (result.openError) console.warn(previewOpenWarning(result.currentPath));
   } catch (error) {
     console.error(error.code === HEAVY_QUEUE_BUSY
       ? `❌ preview не опубликован: ${error.message}`
@@ -310,6 +319,7 @@ if (require.main === module) main();
 module.exports = {
   main,
   openMediaFile,
+  previewOpenWarning,
   parsePreviewOptions,
   runPreview,
 };

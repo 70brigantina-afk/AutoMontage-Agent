@@ -9,6 +9,10 @@
     "version": { "const": 1 },
     "kind": { "const": "motion-reel" },
     "status": { "enum": ["draft", "approved"] },
+    "audioRole": {
+      "description": "narration (default): source audio is speech; music: source audio is the final premixed soundtrack without speech",
+      "enum": ["narration", "music"]
+    },
     "approval": {
       "type": "object",
       "additionalProperties": false,
@@ -257,7 +261,8 @@
                 "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
                 "fit": { "enum": ["contain", "cover"] },
                 "trimStartSec": { "type": "number", "minimum": 0 },
-                "audioMode": { "enum": ["mute", "mix", "replace"] }
+                "audioMode": { "enum": ["mute", "mix", "replace"] },
+                "frame": { "enum": ["card", "full"] }
               }
             }
           ]

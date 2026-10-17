@@ -87,6 +87,9 @@ function validateMotionBrief(brief, { requireApproved = false } = {}) {
     errors.push('source: ссылка на narration должна быть канонической относительной внутри проекта');
   }
   if (brief?.status === 'draft' && brief.approval) errors.push('draft cannot carry an approval receipt');
+  if (brief?.audioRole === 'music' && brief.music) {
+    errors.push('music: a music-only reel uses the source audio as its soundtrack; mix extra music into the source');
+  }
   if (brief?.music && !isCanonicalMotionReference(brief.music.file)) {
     errors.push('music.file: music must be a canonical project reference');
   }
@@ -126,6 +129,13 @@ function validateMotionBrief(brief, { requireApproved = false } = {}) {
       if (kind === 'video' && Number.isFinite(scene.media.trimStartSec)
         && Number.isFinite(fps) && !isFrameSnapped(scene.media.trimStartSec, fps)) {
         errors.push(`scenes[${index}].media.trimStartSec: тайминг должен совпадать с границей кадра`);
+      }
+      if (kind === 'video' && scene.media.frame === 'full') {
+        for (const field of ['overlayText', 'caption']) {
+          if (scene[field] !== undefined) {
+            errors.push(`scenes[${index}].${field}: media with frame "full" fills the whole frame and has no room for ${field}; remove ${field} or use frame "card"`);
+          }
+        }
       }
     }
   });
@@ -192,6 +202,7 @@ function formatMotionBriefMarkdown(brief) {
     '',
     `Статус: \`${brief.status}\``,
     `Формат: \`${brief.output.aspect}\`, ${brief.output.width}x${brief.output.height}, ${brief.output.fps} FPS`,
+    ...(brief.audioRole === 'music' ? ['Аудио: музыка без речи (источник – саундтрек)'] : []),
     '',
     '## Сцены',
     '',

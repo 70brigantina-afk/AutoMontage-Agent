@@ -455,7 +455,11 @@ waivers: [{ gate: 'G1', reason: 'длинный план – демонстра�
 **Известное ограничение.** Preview по motion-reel brief (`MotionReel`, ролик без камеры)
 барьер не проходит вообще: для него гейты не запускаются. Слой kit, подключённый
 media-сценой motion-reel, тоже обходит барьер. Собирайте слой kit через `layer brief` –
-тогда барьер работает.
+тогда барьер работает. То же касается ролика без речи (`automontage motion … --music-only`,
+`audioRole: "music"`): `layer new` не принимает аудиопроекты, а project-local слой такого ролика
+подключается media-сценой с `frame: "full"` (на весь кадр без рамки и зума), поэтому гейты не запускаются. Его preview проверяется вручную по
+[чек-листу ai-promo](../skills/ai-promo/references/qa-checklist.md): ffprobe, контактный лист,
+blackdetect и громкость ebur128 (строка `soundtrack mean <x> dB` из `qa-preview` – не LUFS).
 
 ## Профили и коридор «голос – музыка»
 

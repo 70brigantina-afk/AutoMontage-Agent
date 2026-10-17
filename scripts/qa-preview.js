@@ -164,7 +164,11 @@ function runPreviewQa({ projectDir }, dependencies = {}) {
     if (hashFile(briefPath, fileSystem) !== metadata.briefSha256) throw new Error('motion preview brief is stale');
     if (hashFile(sourcePath, fileSystem) !== metadata.sourceSha256) throw new Error('motion preview narration source is stale');
   }
-  let audio = motion && !brief.music ? { voiceDb: measureAudioImpl({ role: 'voice', sourcePath, brief, range: metadata }) } : null;
+  // A music-only reel measures the same source level; only the label says soundtrack.
+  let audio = motion && !brief.music ? {
+    voiceDb: measureAudioImpl({ role: 'voice', sourcePath, brief, range: metadata }),
+    label: brief.audioRole === 'music' ? 'soundtrack' : 'voice',
+  } : null;
   if (brief.music) {
     const musicPath = motion
       ? resolveProjectPath(resolvedProjectDir, brief.music.file, { fileSystem, mustExist: true, type: 'file' })
@@ -191,6 +195,13 @@ function runPreviewQa({ projectDir }, dependencies = {}) {
   };
 }
 
+// The measured value is ffmpeg volumedetect mean_volume in dB, not integrated loudness (LUFS).
+function formatAudioLine(audio) {
+  const main = `${audio.label || 'voice'} mean ${audio.voiceDb.toFixed(1)} dB`;
+  return audio.musicUnderSpeechDb === undefined
+    ? main : `${main}; ducked music mean ${audio.musicUnderSpeechDb.toFixed(1)} dB`;
+}
+
 function parseQaOptions(argv) {
   if (argv.length !== 2 || argv[0] !== '--project-dir' || !argv[1]) {
     throw new Error('qa:preview requires --project-dir <project>');
@@ -208,7 +219,7 @@ function main(argv = process.argv.slice(2)) {
     console.log(`✅ preview QA: ${label}`);
     console.log(`   ${result.video.width}x${result.video.height}, ${result.video.fps} FPS, ${result.video.duration.toFixed(2)} sec`);
     if (result.audio) {
-      console.log(`   voice ${result.audio.voiceDb.toFixed(1)} dB${result.audio.musicUnderSpeechDb === undefined ? '' : `; ducked music ${result.audio.musicUnderSpeechDb.toFixed(1)} dB`}`);
+      console.log(`   ${formatAudioLine(result.audio)}`);
     }
   } catch (error) {
     console.error(`❌ preview QA: ${error.message}`);
@@ -218,4 +229,4 @@ function main(argv = process.argv.slice(2)) {
 
 if (require.main === module) main();
 
-module.exports = { measureAudio, parseQaOptions, runPreviewQa };
+module.exports = { formatAudioLine, measureAudio, parseQaOptions, runPreviewQa };

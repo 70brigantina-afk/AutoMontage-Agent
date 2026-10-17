@@ -78,6 +78,7 @@ function finishEncodeCommand(input, output, options, isHDR) {
   args.push(
     '-af', buildFinishAudioFilter(options.audioAdvanceMs),
     '-c:a', 'aac',
+    '-ar', '48000',
     '-b:a', '160k',
     '-shortest',
     '-movflags', '+faststart',
