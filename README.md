@@ -99,7 +99,7 @@ automontage doctor      # или: node scripts/doctor.js
 git clone https://github.com/mcdenil-skills/AutoMontage-Agent.git
 cd AutoMontage-Agent
 npm ci                 # точные Node-зависимости из package-lock.json
-pip install -r requirements.txt   # Python: faster-whisper, opencv, numpy
+pip install -r requirements.txt   # Python: faster-whisper, PyAV, opencv, numpy
 npm install -g .       # ставит глобальную команду automontage
 ```
 
