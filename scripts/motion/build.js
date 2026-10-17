@@ -109,11 +109,17 @@ function verifyMotionApproval(workspace, entry, approved) {
   } catch (error) { draft.close(); preview?.close(); throw error; }
 }
 
-// Project directory for the printed resume command: relative to cwd, quoted for the shell when needed.
-function resumeDir(projectDir) {
-  const relative = path.relative(process.cwd(), projectDir);
+// Project directory for the printed resume command: relative to cwd, quoted for the user's shell.
+// Windows (cmd and PowerShell) understands only double quotes and `\` paths; POSIX shells get
+// single quotes. A Windows file name cannot contain `"`, so double quotes never need escaping.
+function resumeDir(projectDir, { platform = process.platform, cwd = process.cwd() } = {}) {
+  const windows = platform === 'win32';
+  const paths = windows ? path.win32 : path.posix;
+  const relative = paths.relative(cwd, projectDir);
   // A leading dash would be read as an option, so it is anchored to the current directory.
-  const shown = relative ? (relative.startsWith('-') ? `./${relative}` : relative) : '.';
+  const anchor = windows ? '.\\' : './';
+  const shown = relative ? (relative.startsWith('-') ? `${anchor}${relative}` : relative) : '.';
+  if (windows) return /^[\w.\\:-]+$/u.test(shown) ? shown : `"${shown}"`;
   return /^[\w./:-]+$/u.test(shown) ? shown : `'${shown.replaceAll("'", "'\\''")}'`;
 }
 
