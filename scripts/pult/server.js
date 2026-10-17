@@ -30,7 +30,9 @@ const {
 const { openPultWindow, revealInFileManager } = require('./launcher');
 const { extractFrame, probeMedia, thumbnailFor } = require('./media-cache');
 const { isSafeName } = require('./names');
-const { readPultState, setArchived } = require('./state');
+const {
+  CARD_ID, isDeclinableBriefPath, readPultState, setArchived, setFinalDeclined,
+} = require('./state');
 
 const IDLE_MS = 30 * 60 * 1000;
 const IDLE_CHECK_MS = 60 * 1000;
@@ -51,6 +53,27 @@ const previewDamaged = () => new PultRequestError(
   'PREVIEW_DAMAGED',
   'Файл preview не совпадает с паспортом ролика – попросите агента пересобрать preview',
 );
+// Утверждённая версия сменилась с момента показа страницы (новое утверждение, новый черновик):
+// решение «финал не нужен» относилось к другой версии.
+const briefChanged = () => new PultRequestError(
+  409,
+  'BRIEF_CHANGED',
+  'Утверждённая версия ролика изменилась – обновите страницу',
+);
+const finalNotWaiting = () => new PultRequestError(409, 'FINAL_NOT_WAITING', 'Эта версия уже не ждёт финала');
+const finalNotDeclined = () => new PultRequestError(409, 'FINAL_NOT_DECLINED', 'Финал этой версии не отмечен как ненужный');
+// Отказы записи состояния пульта (scripts/pult/state.js): файл не читается – запись поверх
+// стёрла бы архив и решения о финале; замок держит другая запись (CLI агента).
+const STATE_ERRORS = Object.freeze({
+  PULT_STATE_UNREADABLE: 'Файл состояния пульта projects/.pult/state.json не читается – '
+    + 'изменение не сохранено. Попросите агента проверить этот файл.',
+  PULT_STATE_BUSY: 'Состояние пульта сейчас занято другой записью – попробуйте ещё раз',
+});
+
+function stateWriteRefusal(error) {
+  const code = error && error.code;
+  return Object.hasOwn(STATE_ERRORS, code) ? new PultRequestError(409, code, STATE_ERRORS[code]) : null;
+}
 const projectBusy = () => new PultRequestError(409, 'PROJECT_BUSY', 'Агент сейчас меняет этот ролик – попробуйте через минуту');
 // Нарезка сменилась или уже не ждёт автора: обновлённая карточка покажет, что теперь на экране.
 const roughCutChanged = () => new PultRequestError(
@@ -178,6 +201,17 @@ async function startPultServer({
       .digest('base64url');
   }
 
+  // «Финал не нужен» (DECISIONS.md D-050): билет привязан к ролику и пути утверждённого brief,
+  // который видела страница. Новое утверждение – новый путь и новый билет. Слово `final` в
+  // подписи не даёт выдать билет утверждения или нарезки за этот и наоборот.
+  function finalTicket(entry) {
+    // Путь, который файл состояния не примет (BRIEF_PATH), – ни кнопки, ни билета.
+    if (!isDeclinableBriefPath(entry.briefPath) || !(entry.needsFinal || entry.finalDeclined)) return null;
+    return createHmac('sha256', ticketSecret)
+      .update(`${entry.key}\0final\0${entry.briefPath}`)
+      .digest('base64url');
+  }
+
   // То же для черновой нарезки: страница смотрела копию из паспорта, и подтверждать можно,
   // только пока её байты на диске совпадают с roughCut.sha256.
   function servedRoughCutMatches(entry) {
@@ -276,6 +310,11 @@ async function startPultServer({
       // плеера должна сказать честно, что финал ждёт отдельной просьбы, а не то, что агент
       // уже занят им.
       archivedNeedsFinal: Boolean(entry.archivedNeedsFinal),
+      // «Финал не нужен» (DECISIONS.md D-050): кнопка отказа – пока версия ждёт финала,
+      // «Вернуть: собрать финал» – после отказа. Билет вместо пути brief.
+      finalDeclinable: Boolean(entry.needsFinal) && isDeclinableBriefPath(entry.briefPath),
+      finalDeclined: Boolean(entry.finalDeclined),
+      finalTicket: finalTicket(entry),
       video: playable ? { kind: entry.video.kind, url: `/media/video?${versioned}` } : null,
       videoUnsupported: Boolean(videoFile) && !playable,
       thumbUrl: videoFile ? `/media/thumb?${versioned}` : null,
@@ -470,8 +509,36 @@ async function startPultServer({
       if (!exactKeys(body, ['cardId', 'archived']) || typeof body.archived !== 'boolean') throw badRequest();
       try {
         setArchived(resolvedProjectsDir, body.cardId, body.archived);
-      } catch (_) {
-        throw new PultRequestError(400, 'INVALID_CARD', 'Неверная карточка');
+      } catch (error) {
+        const refusal = stateWriteRefusal(error);
+        if (refusal) throw refusal;
+        if (typeof body.cardId !== 'string' || !CARD_ID.test(body.cardId)) {
+          throw new PultRequestError(400, 'INVALID_CARD', 'Неверная карточка');
+        }
+        throw error;
+      }
+      sendJson(response, 200, { ok: true });
+      return;
+    }
+    if (pathname === '/api/final-declined') {
+      // Решение пользователя (AGENTS.md, «Пульт роликов»): «финал не нужен» или возврат.
+      if (!exactKeys(body, ['key', 'ticket', 'declined'])
+        || typeof body.ticket !== 'string'
+        || typeof body.declined !== 'boolean') throw badRequest();
+      const entry = findEntry(body.key);
+      if (!entry) throw notFound();
+      const expected = finalTicket(entry);
+      if (!expected || !safeTokenEqual(body.ticket, expected)) throw briefChanged();
+      if (body.declined && !entry.needsFinal) throw finalNotWaiting();
+      if (!body.declined && !entry.finalDeclined) throw finalNotDeclined();
+      try {
+        setFinalDeclined(resolvedProjectsDir, { folder: entry.folder, briefPath: entry.briefPath }, body.declined);
+      } catch (error) {
+        const refusal = stateWriteRefusal(error);
+        if (refusal) throw refusal;
+        // В лог – только класс ошибки: сообщение может содержать абсолютные пути.
+        logger.error(`Пульт: не удалось записать решение о финале (${errorName(error)})`);
+        throw new PultRequestError(500, 'INTERNAL', 'Внутренняя ошибка пульта');
       }
       sendJson(response, 200, { ok: true });
       return;

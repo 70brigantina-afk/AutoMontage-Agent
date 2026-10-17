@@ -9,9 +9,11 @@ const {
 const { scanProjects } = require('../scripts/pult/catalog');
 const { addComment } = require('../scripts/pult/comments');
 const { cardIdFor } = require('../scripts/pult/cards');
-const { setArchived } = require('../scripts/pult/state');
+const { readPultState, setArchived } = require('../scripts/pult/state');
+const { readProjectManifest } = require('../scripts/project/workspace');
 const {
-  addDraftProject, addLegacyFolder, addRoughCutProject, bumpSourceRevision, makePultRoot, republishRoughCut,
+  addDraftProject, addLegacyFolder, addRoughCutProject, addSecondRevision, approveDraft, bumpSourceRevision,
+  makePultRoot, moveCurrentBriefToSubfolder, republishRoughCut,
 } = require('./helpers/pult-projects');
 
 function withComment(t) {
@@ -522,4 +524,119 @@ test('a plain edit to a preview keeps its old line without the rough cut wording
   assert.match(text, /^- Правка `c-0001` на 0:14: «Текст залезает на лицо»\. Видео: `previews\//m);
   assert.doesNotMatch(text, /черновой нарезке/);
   assert.doesNotMatch(text, /в исходнике/);
+});
+
+// «Финал не нужен» (#104, DECISIONS.md D-050): решение пользователя убирает строку
+// «Утверждено» из входящих – и архивную, и обычную. Агент ставит его командой только по
+// явным словам пользователя в чате (AGENTS.md, «Пульт роликов»).
+function runInbox(argv) {
+  const output = [];
+  const code = main(argv, { write: (line) => output.push(line) });
+  return { code, text: output.join('\n') };
+}
+
+test('declining the final removes the approval line, restoring brings it back', (t) => {
+  const { projectsDir } = makePultRoot(t);
+  addDraftProject(projectsDir, { folder: 'archived-approved', name: 'Утверждённый в архиве', approve: true });
+  const entry = scanProjects({ projectsDir }).entries[0];
+  setArchived(projectsDir, cardIdFor(entry), true);
+  const before = formatInbox(buildInbox({ projectsDir }), { projectsDir });
+  assert.match(before, /Утверждено \(в архиве/);
+
+  const declined = runInbox(['--projects-dir', projectsDir, '--decline-final', 'archived-approved']);
+  assert.equal(declined.code, 0);
+  assert.match(declined.text, /Финал не нужен: archived-approved \(brief\/v\d{2}-approved\.lesson\.json\)/);
+  assert.deepEqual(buildInbox({ projectsDir }), []);
+  assert.equal(formatInbox(buildInbox({ projectsDir }), { projectsDir }), 'Во входящих пульта пусто.');
+  // Архив при этом не трогаем: это отдельное решение.
+  assert.deepEqual(readPultState(projectsDir).archived, [cardIdFor(entry)]);
+  // Паспорт ролика тоже не меняется.
+  assert.equal(readProjectManifest(path.join(projectsDir, 'archived-approved')).currentBrief, entry.briefPath);
+
+  const restored = runInbox(['--projects-dir', projectsDir, '--restore-final', 'archived-approved']);
+  assert.equal(restored.code, 0);
+  assert.match(restored.text, /Финал снова нужен: archived-approved/);
+  assert.match(formatInbox(buildInbox({ projectsDir }), { projectsDir }), /Утверждено \(в архиве/);
+});
+
+test('a declined final does not hide new edits of the same video', (t) => {
+  const { projectsDir } = makePultRoot(t);
+  const project = addDraftProject(projectsDir, { folder: 'clip', name: 'Ролик', approve: true });
+  assert.equal(runInbox(['--projects-dir', projectsDir, '--decline-final', 'clip']).code, 0);
+  const entry = scanProjects({ projectsDir }).entries[0];
+  addComment(project.projectDir, { timeSec: 2, text: 'Ещё правка', video: entry.video }, { id: () => 'c-7001' });
+  const text = formatInbox(buildInbox({ projectsDir }), { projectsDir });
+  assert.match(text, /Правка `c-7001`/);
+  assert.doesNotMatch(text, /Утверждено/);
+});
+
+test('a new approval after a declined final brings the approval line back', (t) => {
+  const { projectsDir } = makePultRoot(t);
+  const project = addDraftProject(projectsDir, { folder: 'clip', name: 'Ролик', approve: true });
+  assert.equal(runInbox(['--projects-dir', projectsDir, '--decline-final', 'clip']).code, 0);
+  const { draft } = addSecondRevision(project.projectDir, 'Ролик');
+  approveDraft(project.projectDir, draft.jsonPath);
+  assert.match(formatInbox(buildInbox({ projectsDir }), { projectsDir }), /- Утверждено: `brief\/v\d{2}-approved/);
+});
+
+test('decline and restore refuse videos in the wrong state with a clear error', (t) => {
+  const { projectsDir } = makePultRoot(t);
+  addDraftProject(projectsDir, { folder: 'draft-clip' });
+  addDraftProject(projectsDir, { folder: 'ready-clip', approve: true, final: true });
+  addDraftProject(projectsDir, { folder: 'approved-clip', approve: true });
+  addLegacyFolder(projectsDir, 'notes', { files: { 'notes.md': '#' } });
+  const cases = [
+    [['--decline-final', 'draft-clip'], /нет утверждённой версии, которая ждёт финала/],
+    [['--decline-final', 'ready-clip'], /нет утверждённой версии, которая ждёт финала/],
+    [['--decline-final', 'missing'], /папка ролика не найдена/],
+    [['--decline-final', 'notes'], /папка ролика не найдена/],
+    [['--restore-final', 'approved-clip'], /не отмечен как ненужный/],
+    [['--restore-final', 'ready-clip'], /не отмечен как ненужный/],
+  ];
+  for (const [argv, message] of cases) {
+    const result = runInbox(['--projects-dir', projectsDir, ...argv]);
+    assert.equal(result.code, 1, argv.join(' '));
+    assert.match(result.text, message, argv.join(' '));
+  }
+  assert.ok(!fs.existsSync(path.join(projectsDir, '.pult', 'state.json')));
+  // Повторный отказ – тоже ошибка: финала версия уже не ждёт.
+  assert.equal(runInbox(['--projects-dir', projectsDir, '--decline-final', 'approved-clip']).code, 0);
+  assert.match(runInbox(['--projects-dir', projectsDir, '--decline-final', 'approved-clip']).text, /нет утверждённой версии/);
+});
+
+test('decline and restore options reject unsafe or missing folders', () => {
+  for (const flag of ['--decline-final', '--restore-final']) {
+    assert.throws(() => parseInboxOptions([flag]), /папк/);
+    assert.throws(() => parseInboxOptions([flag, '../x']), /папк/);
+    assert.throws(() => parseInboxOptions([flag, '--projects-dir']), /папк/);
+    assert.equal(parseInboxOptions([flag, 'clip'])[flag === '--decline-final' ? 'declineFinal' : 'restoreFinal'], 'clip');
+  }
+  assert.throws(() => parseInboxOptions(['--decline-final', 'a', '--restore-final', 'a']), /одн/);
+});
+
+test('inbox --help lists the final flags', () => {
+  const result = runInbox(['--help']);
+  assert.equal(result.code, 0);
+  assert.match(result.text, /--decline-final <папка>/);
+  assert.match(result.text, /--restore-final <папка>/);
+  assert.match(result.text, /--accept <папка> <id>/);
+});
+
+// Ревью #104: CLI отказывает понятно (код 1) и для необычного пути brief, и для нечитаемого
+// файла состояния – и ничего не перезаписывает.
+test('decline-final refuses an odd brief path and an unreadable state file', (t) => {
+  const { projectsDir } = makePultRoot(t);
+  const odd = addDraftProject(projectsDir, { folder: 'odd-clip', approve: true });
+  moveCurrentBriefToSubfolder(odd.projectDir);
+  addDraftProject(projectsDir, { folder: 'clip', approve: true });
+  const oddResult = runInbox(['--projects-dir', projectsDir, '--decline-final', 'odd-clip']);
+  assert.equal(oddResult.code, 1);
+  assert.match(oddResult.text, /нельзя отметить/);
+  fs.mkdirSync(path.join(projectsDir, '.pult'), { recursive: true });
+  const file = path.join(projectsDir, '.pult', 'state.json');
+  fs.writeFileSync(file, '{"version":1,"archived":["folder:x"],"finalDeclined":"oops"}');
+  const broken = runInbox(['--projects-dir', projectsDir, '--decline-final', 'clip']);
+  assert.equal(broken.code, 1);
+  assert.match(broken.text, /state\.json не читается/);
+  assert.equal(fs.readFileSync(file, 'utf8'), '{"version":1,"archived":["folder:x"],"finalDeclined":"oops"}');
 });

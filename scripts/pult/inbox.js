@@ -4,17 +4,30 @@ const path = require('node:path');
 
 const { editPathForRoughCutVideo, roughCutTimeToSource } = require('../project/rough-cut-model');
 const { resolveProjectPath } = require('../project/workspace');
-const { scanProjects } = require('./catalog');
+const { scanFolder, scanProjects } = require('./catalog');
 const { cardIdFor } = require('./cards');
 const { COMMENT_ID, acceptComment, readComments } = require('./comments');
 const { isSafeName } = require('./names');
-const { readPultState } = require('./state');
+const { isDeclinableBriefPath, readPultState, setFinalDeclined } = require('./state');
 const { acceptLeadMagnetComment } = require('../lead-magnet/comments');
 const { DECISION_ID, LEAD_MAGNET_ID, LM_COMMENT_ID } = require('../lead-magnet/constants');
 const { buildLeadMagnetInbox, formatLeadMagnetInbox } = require('../lead-magnet/inbox');
 const { acceptDecision } = require('../lead-magnet/requests');
 
 const ROOT = path.resolve(__dirname, '../..');
+const USAGE = `Входящие пульта роликов – для агента
+
+  automontage inbox                              правки и утверждения из пульта
+  automontage inbox --accept <папка> <id>        отметить правку выполненной
+  automontage inbox --accept-lead <папка|id> <id>  отметить запрос или правку лид-магнита
+  automontage inbox --decline-final <папка>      финал утверждённой версии не нужен –
+                                                 только по явным словам пользователя в чате
+  automontage inbox --restore-final <папка>      снова собрать финал этой версии –
+                                                 тоже только по словам пользователя
+
+<папка> – имя папки ролика без projects/.
+Опции:
+  --projects-dir <путь>   папка с роликами (по умолчанию projects/ в репозитории)`;
 
 function formatTime(seconds) {
   const total = Math.floor(seconds);
@@ -87,6 +100,8 @@ function roughCutSource(projectDir, comment, cache) {
 // пользователь убрал карточку в архив уже после утверждения. Новые правки того же ролика архив
 // не трогает – это явная новая работа автора. То же с «Нарезка подтверждена»: кнопка «Нарезка
 // готова» – само явное решение автора, поэтому строка не зависит ни от архива, ни от needsFinal.
+// «Финал не нужен» (DECISIONS.md D-050) каталог уже учёл в entry.needsFinal: отклонённая
+// версия сюда не попадает вовсе, а новое утверждение того же ролика вернёт строку само.
 function buildInbox({ projectsDir }) {
   const archivedIds = new Set(readPultState(projectsDir).archived);
   const byFolder = new Map();
@@ -230,9 +245,32 @@ function formatInbox(items, { projectsDir, cwd = process.cwd() }) {
 }
 
 function parseInboxOptions(argv, { root = ROOT } = {}) {
-  const options = { projectsDir: path.join(root, 'projects'), accept: null, acceptLead: null };
+  const options = {
+    projectsDir: path.join(root, 'projects'),
+    accept: null,
+    acceptLead: null,
+    declineFinal: null,
+    restoreFinal: null,
+    help: false,
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
+    if (argument === '--help' || argument === '-h') {
+      options.help = true;
+      continue;
+    }
+    if (argument === '--decline-final' || argument === '--restore-final') {
+      const folder = argv[index + 1];
+      if (typeof folder !== 'string' || folder.startsWith('--') || !isSafeName(folder)) {
+        throw new Error(`${argument}: неверная папка ролика`);
+      }
+      if (options.declineFinal || options.restoreFinal) {
+        throw new Error('--decline-final и --restore-final: только одна папка за раз');
+      }
+      options[argument === '--decline-final' ? 'declineFinal' : 'restoreFinal'] = folder;
+      index += 1;
+      continue;
+    }
     if (argument === '--projects-dir') {
       const value = argv[index + 1];
       if (!value || value.startsWith('--')) throw new Error('--projects-dir требует путь');
@@ -266,9 +304,43 @@ function parseInboxOptions(argv, { root = ROOT } = {}) {
   return options;
 }
 
+// «Финал не нужен» (DECISIONS.md D-050): решение пользователя об утверждённой версии без финала.
+// Ставится только по явным словам пользователя в чате (AGENTS.md, «Пульт роликов»). Отказ
+// возможен, только пока версия ждёт финала; возврат – только для уже отклонённой версии.
+// Решение привязано к точному пути утверждённого brief: новое утверждение вернёт строку само.
+function changeFinalDeclined(projectsDir, folder, declined) {
+  const entry = scanFolder(projectsDir, folder).entries.find((item) => item.kind === 'standard');
+  if (!entry) throw new Error('папка ролика не найдена или не читается');
+  if (declined && !entry.needsFinal) {
+    throw new Error('у ролика нет утверждённой версии, которая ждёт финала');
+  }
+  if (!isDeclinableBriefPath(entry.briefPath)) {
+    throw new Error('утверждённый brief лежит не прямо в папке brief/ – решение о финале для него нельзя отметить');
+  }
+  if (!declined && !entry.finalDeclined) {
+    throw new Error('финал этого ролика не отмечен как ненужный');
+  }
+  setFinalDeclined(projectsDir, { folder, briefPath: entry.briefPath }, declined);
+  return entry.briefPath;
+}
+
 function main(argv = process.argv.slice(2), { write = (line) => console.log(line), cwd = process.cwd() } = {}) {
   try {
     const options = parseInboxOptions(argv);
+    if (options.help) {
+      write(USAGE);
+      return 0;
+    }
+    if (options.declineFinal) {
+      const briefPath = changeFinalDeclined(options.projectsDir, options.declineFinal, true);
+      write(`Финал не нужен: ${stripControls(options.declineFinal)} (${stripControls(briefPath)}). Строки «Утверждено» во входящих больше нет.`);
+      return 0;
+    }
+    if (options.restoreFinal) {
+      const briefPath = changeFinalDeclined(options.projectsDir, options.restoreFinal, false);
+      write(`Финал снова нужен: ${stripControls(options.restoreFinal)} (${stripControls(briefPath)}). Утверждение вернулось во входящие.`);
+      return 0;
+    }
     if (options.accept) {
       const projectDir = path.join(options.projectsDir, options.accept.folder);
       const stat = fs.lstatSync(projectDir);
@@ -304,5 +376,5 @@ function main(argv = process.argv.slice(2), { write = (line) => console.log(line
 if (require.main === module) process.exitCode = main();
 
 module.exports = {
-  buildInbox, formatInbox, formatSourceTime, main, parseInboxOptions,
+  USAGE, buildInbox, formatInbox, formatSourceTime, main, parseInboxOptions,
 };

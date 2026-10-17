@@ -12,6 +12,7 @@ const { acceptComment, readComments } = require('../scripts/pult/comments');
 const { buildInbox, formatInbox } = require('../scripts/pult/inbox');
 const { startPultServer } = require('../scripts/pult/server');
 const { readPultState } = require('../scripts/pult/state');
+const { acquireProjectMutationLease } = require('../scripts/project/workspace');
 const {
   ROOT,
   addDraftProject,
@@ -19,6 +20,7 @@ const {
   addRoughCutProject,
   addSecondRevision,
   makePultRoot,
+  moveCurrentBriefToSubfolder,
   republishRoughCut,
   sha256,
   unresolvedBrollScenes,
@@ -1052,6 +1054,223 @@ test('a failing un-archive after a successful approval still returns success and
   assert.ok(calls.logs.every((line) => !line.includes(projectsDir)));
   const cards = (await get(session, '/api/cards')).json;
   assert.deepEqual(cards.archive.map((card) => card.id), ['folder:waiting-clip']);
+});
+
+// «Финал не нужен» (#104, DECISIONS.md D-050). Страница не знает путей: решение адресуется
+// непрозрачным билетом finalTicket, привязанным к ключу ролика и пути утверждённого brief.
+const declineFinal = (session, key, ticket, declined = true) => post(session, '/api/final-declined', { key, ticket, declined });
+
+test('the author declines the final of an approved video in the pult and can bring it back', async (t) => {
+  const projectsDir = await standardRoot(t);
+  addDraftProject(projectsDir, { folder: 'approved-clip', name: 'Утверждён', approve: true });
+  const { session } = await startTest(t, projectsDir);
+  const waiting = await variantOf(session, 'approved-clip');
+  assert.equal(waiting.needsFinal, true);
+  assert.equal(waiting.finalDeclinable, true);
+  assert.equal(waiting.finalDeclined, false);
+  assert.equal(typeof waiting.finalTicket, 'string');
+  // Ни черновик, ни готовый ролик отказаться от финала не дают.
+  assert.equal((await variantOf(session, 'waiting-clip')).finalTicket, null);
+  assert.equal((await variantOf(session, 'ready-clip')).finalTicket, null);
+  const manifestBefore = fs.readFileSync(path.join(projectsDir, 'approved-clip', 'project.json'), 'utf8');
+
+  const declined = await declineFinal(session, 'approved-clip', waiting.finalTicket);
+  assert.equal(declined.status, 200);
+  assert.deepEqual(declined.json, { ok: true });
+  const after = await variantOf(session, 'approved-clip');
+  assert.equal(after.needsFinal, false);
+  assert.equal(after.finalDeclined, true);
+  assert.equal(after.finalDeclinable, false);
+  assert.equal(after.status, 'ready');
+  assert.equal(after.nextStep, 'Финал не нужен');
+  assert.equal(after.finalTicket, waiting.finalTicket);
+  const cards = (await get(session, '/api/cards')).json;
+  assert.ok(cards.ready.some((card) => card.id === 'folder:approved-clip'));
+  assert.doesNotMatch(JSON.stringify(cards), /brief\//);
+  assert.equal(formatInbox(buildInbox({ projectsDir }), { projectsDir }), 'Во входящих пульта пусто.');
+  assert.equal(fs.readFileSync(path.join(projectsDir, 'approved-clip', 'project.json'), 'utf8'), manifestBefore);
+
+  // Повторный отказ – конфликт: финала версия уже не ждёт.
+  const again = await declineFinal(session, 'approved-clip', waiting.finalTicket);
+  assert.equal(again.status, 409);
+  assert.equal(again.json.code, 'FINAL_NOT_WAITING');
+
+  const restored = await declineFinal(session, 'approved-clip', after.finalTicket, false);
+  assert.equal(restored.status, 200);
+  const back = await variantOf(session, 'approved-clip');
+  assert.equal(back.needsFinal, true);
+  assert.equal(back.finalDeclined, false);
+  assert.match(formatInbox(buildInbox({ projectsDir }), { projectsDir }), /- Утверждено: `brief\//);
+  const restoreAgain = await declineFinal(session, 'approved-clip', back.finalTicket, false);
+  assert.equal(restoreAgain.status, 409);
+  assert.equal(restoreAgain.json.code, 'FINAL_NOT_DECLINED');
+});
+
+test('declining the final of an archived approval clears the archive mark and keeps the card archived', async (t) => {
+  const projectsDir = await standardRoot(t);
+  const { session } = await startTest(t, projectsDir);
+  const ticket = (await variantOf(session, 'waiting-clip')).approvalTicket;
+  assert.equal((await approve(session, 'waiting-clip', ticket)).status, 201);
+  await post(session, '/api/archive', { cardId: 'folder:waiting-clip', archived: true });
+  const archived = await variantOf(session, 'waiting-clip');
+  assert.equal(archived.archivedNeedsFinal, true);
+  assert.equal(archived.finalDeclinable, true);
+  assert.equal((await declineFinal(session, 'waiting-clip', archived.finalTicket)).status, 200);
+  const cards = (await get(session, '/api/cards')).json;
+  const card = cards.archive.find((item) => item.id === 'folder:waiting-clip');
+  assert.equal(card.nextStep, 'Финал не нужен');
+  assert.equal(card.variants[0].archivedNeedsFinal, false);
+  assert.equal(card.variants[0].finalDeclined, true);
+  assert.doesNotMatch(formatInbox(buildInbox({ projectsDir }), { projectsDir }), /Утверждено/);
+  assert.deepEqual(readPultState(projectsDir).archived, ['folder:waiting-clip']);
+});
+
+test('a final ticket is bound to the approved version it was issued for', async (t) => {
+  const { projectsDir } = makePultRoot(t);
+  const built = addDraftProject(projectsDir, { folder: 'clip', name: 'Две версии', approve: true });
+  addDraftProject(projectsDir, { folder: 'other-clip', name: 'Другой', approve: true });
+  const { session } = await startTest(t, projectsDir);
+  const oldTicket = (await variantOf(session, 'clip')).finalTicket;
+  // Чужой билет к другому ролику не подходит.
+  const foreign = await declineFinal(session, 'other-clip', oldTicket);
+  assert.equal(foreign.status, 409);
+  assert.equal(foreign.json.code, 'BRIEF_CHANGED');
+  // Новая версия, утверждённая после показа страницы: старый билет протух.
+  const second = addSecondRevision(built.projectDir, 'Две версии');
+  const waiting = await variantOf(session, 'clip');
+  assert.equal(waiting.finalTicket, null);
+  const draftRefused = await declineFinal(session, 'clip', oldTicket);
+  assert.equal(draftRefused.status, 409);
+  assert.equal(draftRefused.json.code, 'BRIEF_CHANGED');
+  assert.equal((await approve(session, 'clip', waiting.approvalTicket)).status, 201);
+  assert.ok(second.draft);
+  const stale = await declineFinal(session, 'clip', oldTicket);
+  assert.equal(stale.status, 409);
+  assert.equal(stale.json.code, 'BRIEF_CHANGED');
+  assert.equal(readPultState(projectsDir).finalDeclined.length, 0);
+  const fresh = (await variantOf(session, 'clip')).finalTicket;
+  assert.notEqual(fresh, oldTicket);
+  assert.equal((await declineFinal(session, 'clip', fresh)).status, 200);
+});
+
+// Security testing (AGENTS.md): каждый вредный запрос отклонён и ничего не пишет; рядом –
+// легитимный запрос, который проходит.
+test('the final-declined route rejects foreign, malformed and traversal requests', async (t) => {
+  const projectsDir = await standardRoot(t);
+  addDraftProject(projectsDir, { folder: 'approved-clip', name: 'Утверждён', approve: true });
+  const { session, calls } = await startTest(t, projectsDir);
+  const variant = await variantOf(session, 'approved-clip');
+  const ticket = variant.finalTicket;
+  const body = { key: 'approved-clip', ticket, declined: true };
+
+  assert.equal((await request(session, '/api/final-declined', { method: 'POST', origin: session.origin, body })).status, 401);
+  assert.equal((await request(session, '/api/final-declined', { method: 'POST', token: session.token, body })).status, 403);
+  assert.equal((await request(session, '/api/final-declined', {
+    method: 'POST', token: session.token, origin: 'http://evil.test', body,
+  })).status, 403);
+  assert.equal((await get(session, '/api/final-declined')).status, 405);
+
+  const badBodies = [
+    {},
+    { key: 'approved-clip', declined: true },
+    { key: 'approved-clip', ticket },
+    { ...body, extra: 1 },
+    { key: 'approved-clip', briefPath: 'brief/../../../etc/passwd', declined: true },
+    { key: 'approved-clip', ticket, briefPath: '../project.json', declined: true },
+    { ...body, declined: 'true' },
+    { ...body, declined: 1 },
+    { ...body, declined: null },
+    { ...body, ticket: 42 },
+    { ...body, ticket: null },
+    [body],
+  ];
+  for (const bad of badBodies) {
+    const refused = await post(session, '/api/final-declined', bad);
+    assert.equal(refused.status, 400, JSON.stringify(bad));
+  }
+  for (const key of ['missing-clip', '../approved-clip', 'approved-clip/../ready-clip', '.pult', 'approved-clip#0']) {
+    const refused = await post(session, '/api/final-declined', { ...body, key });
+    assert.equal(refused.status, 404, key);
+  }
+  for (const wrong of ['', 'x'.repeat(43), variant.approvalTicket || 'y'.repeat(43)]) {
+    const refused = await post(session, '/api/final-declined', { ...body, ticket: wrong });
+    assert.equal(refused.status, 409, wrong);
+    assert.equal(refused.json.code, 'BRIEF_CHANGED');
+    assertNoPathLeak(refused.body.toString('utf8'), projectsDir);
+  }
+  // Билет утверждения не подходит как билет финала, и наоборот.
+  const draftTicket = (await variantOf(session, 'waiting-clip')).approvalTicket;
+  assert.equal((await post(session, '/api/final-declined', { key: 'waiting-clip', ticket: draftTicket, declined: true })).status, 409);
+  assert.equal((await approve(session, 'waiting-clip', ticket)).status, 409);
+  assert.equal(readPultState(projectsDir).finalDeclined.length, 0);
+  assert.ok(!fs.existsSync(path.join(projectsDir, '.pult', 'state.json')));
+
+  const accepted = await post(session, '/api/final-declined', body);
+  assert.equal(accepted.status, 200);
+  assert.deepEqual(readPultState(projectsDir).finalDeclined.map((item) => [item.folder, item.briefPath]), [
+    ['approved-clip', readProjectManifest(path.join(projectsDir, 'approved-clip')).currentBrief],
+  ]);
+  assert.ok(calls.logs.every((line) => !line.includes(projectsDir)));
+});
+
+// Ревью #104: запись поверх нечитаемого state.json стёрла бы архив и решения о финале –
+// маршруты отказывают понятной фразой без путей, а показ карточек продолжает работать.
+test('archive and final routes refuse to overwrite an unreadable state file', async (t) => {
+  const projectsDir = await standardRoot(t);
+  addDraftProject(projectsDir, { folder: 'approved-clip', name: 'Утверждён', approve: true });
+  const { session, calls } = await startTest(t, projectsDir);
+  const ticket = (await variantOf(session, 'approved-clip')).finalTicket;
+  fs.mkdirSync(path.join(projectsDir, '.pult'), { recursive: true });
+  const file = path.join(projectsDir, '.pult', 'state.json');
+  fs.writeFileSync(file, '{ broken');
+  assert.equal((await get(session, '/api/cards')).status, 200);
+  for (const [route, body] of [
+    ['/api/archive', { cardId: 'folder:ready-clip', archived: true }],
+    ['/api/final-declined', { key: 'approved-clip', ticket, declined: true }],
+  ]) {
+    const refused = await post(session, route, body);
+    assert.equal(refused.status, 409, route);
+    assert.equal(refused.json.code, 'PULT_STATE_UNREADABLE', route);
+    assert.match(refused.json.message, /state\.json не читается/, route);
+    assertNoPathLeak(refused.body.toString('utf8'), projectsDir);
+  }
+  assert.equal(fs.readFileSync(file, 'utf8'), '{ broken');
+  assert.equal((await post(session, '/api/archive', { cardId: '../x', archived: true })).status, 400);
+  assert.ok(calls.logs.every((line) => !line.includes(projectsDir)));
+});
+
+test('a state write held by another process is reported as busy', async (t) => {
+  const projectsDir = await standardRoot(t);
+  addDraftProject(projectsDir, { folder: 'approved-clip', name: 'Утверждён', approve: true });
+  const { session } = await startTest(t, projectsDir);
+  const ticket = (await variantOf(session, 'approved-clip')).finalTicket;
+  fs.mkdirSync(path.join(projectsDir, '.pult'), { recursive: true });
+  const lease = acquireProjectMutationLease(path.join(projectsDir, '.pult'));
+  let refused;
+  try {
+    refused = await post(session, '/api/final-declined', { key: 'approved-clip', ticket, declined: true });
+  } finally {
+    lease.release();
+  }
+  assert.equal(refused.status, 409);
+  assert.equal(refused.json.code, 'PULT_STATE_BUSY');
+  assert.equal((await post(session, '/api/final-declined', { key: 'approved-clip', ticket, declined: true })).status, 200);
+});
+
+// Ревью #104: у пути brief, который файл состояния не примет, кнопки и билета нет вовсе –
+// раньше кнопка показывалась, а нажатие давало 500.
+test('an approved brief outside the plain brief/ folder offers no final decision', async (t) => {
+  const { projectsDir } = makePultRoot(t);
+  const built = addDraftProject(projectsDir, { folder: 'odd-clip', name: 'Необычный путь', approve: true });
+  moveCurrentBriefToSubfolder(built.projectDir);
+  const { session } = await startTest(t, projectsDir);
+  const variant = await variantOf(session, 'odd-clip');
+  assert.equal(variant.needsFinal, true);
+  assert.equal(variant.finalDeclinable, false);
+  assert.equal(variant.finalTicket, null);
+  const refused = await post(session, '/api/final-declined', { key: 'odd-clip', ticket: 'x'.repeat(43), declined: true });
+  assert.equal(refused.status, 409);
+  assert.equal(refused.json.code, 'BRIEF_CHANGED');
 });
 
 test('reveal opens the file manager at the video or folder', async (t) => {

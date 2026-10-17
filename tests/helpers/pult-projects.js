@@ -306,8 +306,23 @@ function addLegacyFolder(projectsDir, folder, { card = null, files = {} } = {}) 
   return dir;
 }
 
+// Переносит текущий brief в подпапку brief/old/ и правит все ссылки паспорта на него: движок
+// такой путь читает, а файл состояния пульта решение «финал не нужен» для него не примет
+// (BRIEF_PATH в scripts/pult/state.js) – ревью #104.
+function moveCurrentBriefToSubfolder(projectDir) {
+  const manifestPath = path.join(projectDir, 'project.json');
+  const current = JSON.parse(fs.readFileSync(manifestPath, 'utf8')).currentBrief;
+  const moved = `brief/old/${path.basename(current)}`;
+  fs.mkdirSync(path.join(projectDir, 'brief', 'old'), { recursive: true });
+  fs.renameSync(path.join(projectDir, ...current.split('/')), path.join(projectDir, ...moved.split('/')));
+  const text = fs.readFileSync(manifestPath, 'utf8').split(JSON.stringify(current)).join(JSON.stringify(moved));
+  fs.writeFileSync(manifestPath, text);
+  return moved;
+}
+
 module.exports = {
   ROOT,
+  moveCurrentBriefToSubfolder,
   addDraftProject,
   addLegacyFolder,
   addRoughCutProject,

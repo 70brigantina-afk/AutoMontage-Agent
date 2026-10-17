@@ -133,6 +133,9 @@ button, input, textarea { font: inherit; color: inherit; }
 .agent-handoff .hint, .roughcut .hint { margin: 0; }
 /* Нарезка ждёт решения автора – рамка того же янтаря, что у карточки «Ждёт меня». */
 .roughcut { border-color: hsl(var(--amber) / 0.7); }
+/* «Финал не нужен» – тихое решение в блоке действий: кнопка и подтверждение под ней. */
+.final-choice, .final-choice__confirm { display: flex; flex-direction: column; gap: 0.6rem; }
+.final-choice .hint { margin: 0; }
 /* Подтверждённая нарезка уже ничего не ждёт от автора: рамка обычная, отметка – того же бирюзового
    «принято», что у .copy-status и бейджа «Готов». */
 .roughcut--confirmed { border-color: hsl(var(--border)); }

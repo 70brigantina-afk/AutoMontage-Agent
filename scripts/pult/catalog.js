@@ -7,6 +7,7 @@ const { readPultCard } = require('./card-file');
 const { countNewComments } = require('./comments');
 const { hashBytes } = require('./files');
 const { SAFE_NAME, isSafeName } = require('./names');
+const { declinedKey, declinedSet, readPultState } = require('./state');
 const { deriveVariantStatus, pluralEdits } = require('./status');
 
 // Ключ карточки – то же самое deny-list правило, что и для имён папок (см. names.js):
@@ -135,7 +136,9 @@ function roughCutCuts(projectDir, roughCut) {
   }));
 }
 
-function standardEntry(folder, projectDir, manifest, card) {
+// declined – множество ключей declinedKey(папка, путь утверждённого brief) из
+// projects/.pult/state.json: решения «финал не нужен» (DECISIONS.md D-050).
+function standardEntry(folder, projectDir, manifest, card, declined = new Set()) {
   const briefEntry = manifest.currentBrief
     ? manifest.briefs.find((brief) => brief.jsonPath === manifest.currentBrief) || null
     : null;
@@ -156,6 +159,7 @@ function standardEntry(folder, projectDir, manifest, card) {
     pendingComments,
     approvalBlocker: isLessonDraft && briefBytes ? lessonApprovalBlocker(briefBytes) : null,
     roughCutExists,
+    finalDeclined: Boolean(manifest.currentBrief) && declined.has(declinedKey(folder, manifest.currentBrief)),
   });
   return {
     key: folder,
@@ -220,6 +224,7 @@ function legacyEntries(folder, projectDir, card) {
       video: file ? { kind: variant.final ? 'final' : 'preview', path: variant.video, sha256: null } : null,
       approvable: false,
       needsFinal: false,
+      finalDeclined: false,
       briefPath: null,
       previewSha256: null,
       roughCut: null,
@@ -234,12 +239,13 @@ function legacyEntries(folder, projectDir, card) {
 // Поэтому здесь же – полная проверка безопасности имени, а не только та, что уже прошла
 // через listFolders.
 function scanFolder(projectsDir, folder) {
-  return scanFolderIn(projectsDir, folder, new Set(listFolders(projectsDir)));
+  return scanFolderIn(projectsDir, folder, new Set(listFolders(projectsDir)), declinedSet(readPultState(projectsDir)));
 }
 
 // knownFolders – уже прочитанный listFolders(projectsDir): scanProjects читает папку
-// projects/ один раз на весь каталог, а не заново для каждой папки ролика.
-function scanFolderIn(projectsDir, folder, knownFolders) {
+// projects/ один раз на весь каталог, а не заново для каждой папки ролика. declined – так же
+// один раз прочитанные решения «финал не нужен» из состояния пульта.
+function scanFolderIn(projectsDir, folder, knownFolders, declined) {
   const empty = () => ({ entries: [], unregistered: [], broken: [] });
   if (!isSafeName(folder)) return empty();
   // APFS и NTFS по умолчанию нечувствительны к регистру и нормализации Unicode:
@@ -274,7 +280,7 @@ function scanFolderIn(projectsDir, folder, knownFolders) {
     }
     if (manifestReadOk) {
       try {
-        const entry = standardEntry(folder, projectDir, manifest, card);
+        const entry = standardEntry(folder, projectDir, manifest, card, declined);
         // Карточка стандартного проекта необязательна, но если она есть и битая –
         // человек должен увидеть это в «Не читается», а не потерять её незаметно.
         const broken = cardResult.ok ? [] : [{ folder, error: cardResult.error }];
@@ -317,10 +323,11 @@ function scanProjects({ projectsDir }) {
   const broken = [];
   const folders = listFolders(projectsDir);
   const knownFolders = new Set(folders);
+  const declined = declinedSet(readPultState(projectsDir));
   for (const folder of folders) {
     let result;
     try {
-      result = scanFolderIn(projectsDir, folder, knownFolders);
+      result = scanFolderIn(projectsDir, folder, knownFolders, declined);
     } catch (_) {
       result = { entries: [], unregistered: [], broken: [{ folder, error: FOLDER_UNREADABLE_ERROR }] };
     }

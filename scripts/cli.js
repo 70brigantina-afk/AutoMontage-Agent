@@ -33,6 +33,7 @@ function help() {
   automontage pult                    открыть «Пульт роликов» со всеми роликами
   automontage pult --install-shortcut создать значок пульта (macOS/Windows)
   automontage inbox                   правки и утверждения из пульта для агента
+                                      (--help: --accept, --decline-final, --restore-final)
   automontage queue                   состояние очереди тяжёлых задач
   automontage lead-magnet --help      лид-магниты: обещание, сборка, проверка (для агента)
   automontage preview --project-dir . --brief brief/v01-draft.lesson.json

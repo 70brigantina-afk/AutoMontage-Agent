@@ -6,10 +6,13 @@ const path = require('node:path');
 const { ENTRY_KEY, folderFromKey, scanFolder, scanProjects } = require('../scripts/pult/catalog');
 const { addComment } = require('../scripts/pult/comments');
 const { nextRenderPaths, readProjectManifest, recordRender } = require('../scripts/project/workspace');
+const { setFinalDeclined } = require('../scripts/pult/state');
 const {
   addDraftProject,
   addLegacyFolder,
   addRoughCutProject,
+  addSecondRevision,
+  approveDraft,
   bumpSourceRevision,
   makePultRoot,
   republishRoughCut,
@@ -483,4 +486,50 @@ test('legacy variants carry empty rough cut fields', (t) => {
     assert.equal(entry.roughCutConfirmable, false);
     assert.deepEqual(entry.roughCutCuts, []);
   }
+});
+
+// «Финал не нужен» (#104, DECISIONS.md D-050): каталог сам читает решение из
+// projects/.pult/state.json – и полным сканированием, и точечным (так ищет ролик сервер).
+test('a declined final of the current approved brief makes the video ready without a final', (t) => {
+  const { projectsDir } = makePultRoot(t);
+  const built = addDraftProject(projectsDir, { folder: 'clip', name: 'Отказ', approve: true });
+  const approvedPath = readProjectManifest(built.projectDir).currentBrief;
+  assert.equal(scanProjects({ projectsDir }).entries[0].needsFinal, true);
+  setFinalDeclined(projectsDir, { folder: 'clip', briefPath: approvedPath }, true);
+  for (const entry of [scanProjects({ projectsDir }).entries[0], scanFolder(projectsDir, 'clip').entries[0]]) {
+    assert.equal(entry.needsFinal, false);
+    assert.equal(entry.finalDeclined, true);
+    assert.equal(entry.status, 'ready');
+    assert.equal(entry.nextStep, 'Финал не нужен');
+  }
+  // Решение по другой папке или другой версии этот ролик не трогает.
+  setFinalDeclined(projectsDir, { folder: 'clip', briefPath: approvedPath }, false);
+  setFinalDeclined(projectsDir, { folder: 'other', briefPath: approvedPath }, true);
+  setFinalDeclined(projectsDir, { folder: 'clip', briefPath: 'brief/v99-approved.lesson.json' }, true);
+  assert.equal(scanProjects({ projectsDir }).entries[0].needsFinal, true);
+});
+
+test('a new approval of the same video brings the final back after a decline', (t) => {
+  const { projectsDir } = makePultRoot(t);
+  const built = addDraftProject(projectsDir, { folder: 'clip', name: 'Снова', approve: true });
+  const firstApproved = readProjectManifest(built.projectDir).currentBrief;
+  setFinalDeclined(projectsDir, { folder: 'clip', briefPath: firstApproved }, true);
+  const { draft } = addSecondRevision(built.projectDir, 'Снова');
+  approveDraft(built.projectDir, draft.jsonPath);
+  const entry = scanProjects({ projectsDir }).entries[0];
+  assert.notEqual(entry.briefPath, firstApproved);
+  assert.equal(entry.needsFinal, true);
+  assert.equal(entry.finalDeclined, false);
+  assert.equal(entry.nextStep, 'Утверждено – агент собирает финал');
+});
+
+test('legacy variants are never declined and a broken state file declines nothing', (t) => {
+  const { projectsDir } = makePultRoot(t);
+  addDraftProject(projectsDir, { folder: 'clip', approve: true });
+  addLegacyFolder(projectsDir, 'series', { card: seriesCard(), files: { 'out/one.mp4': 'one', 'out/two.mp4': 'two' } });
+  fs.mkdirSync(path.join(projectsDir, '.pult'), { recursive: true });
+  fs.writeFileSync(path.join(projectsDir, '.pult', 'state.json'), '{ broken');
+  const entries = scanProjects({ projectsDir }).entries;
+  assert.equal(entries.find((item) => item.key === 'clip').needsFinal, true);
+  for (const entry of entries) assert.equal(entry.finalDeclined, false, entry.key);
 });
