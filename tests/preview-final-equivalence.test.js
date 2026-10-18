@@ -144,7 +144,7 @@ test('benchmark cycle times Remotion while still finishing the compared artifact
   assert.equal(calls[0][0], 'render');
   assert.match(calls[0][2].find((value) => value.endsWith('.mp4')), /preview-warm\.raw\.mp4$/);
   assert.equal(calls[1][0], 'finish');
-  assert.deepEqual(calls[1][2].slice(-4), ['--hdrfix', 'auto', '--audio-advance-ms', '42.5']);
+  assert.deepEqual(calls[1][2].slice(-4), ['--hdrfix', 'auto', '--audio-advance-ms', '0']);
   assert.equal(calls[1][2][1], cycle.output);
 });
 

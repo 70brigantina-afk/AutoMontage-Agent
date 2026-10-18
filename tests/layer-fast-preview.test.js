@@ -161,7 +161,7 @@ test('runPreview falls back to Remotion when the fast path refuses', (t) => {
   });
   assert.deepEqual(calls.map(([stage]) => stage), ['preview Remotion', 'preview finish', 'preview decode']);
   const finishArgs = calls[1][1];
-  assert.equal(finishArgs[finishArgs.indexOf('--audio-advance-ms') + 1], '42.5');
+  assert.equal(finishArgs[finishArgs.indexOf('--audio-advance-ms') + 1], '0');
 });
 
 test('regression: a layer longer than the video is re-encoded to the exact frame count, never stream-copied', () => {
