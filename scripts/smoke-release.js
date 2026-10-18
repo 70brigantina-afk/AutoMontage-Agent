@@ -215,6 +215,17 @@ function runMotionReleaseSmoke({ root = ROOT, workDir = path.join(root, 'out/rel
   return { motionFinal, motionEvidence: working };
 }
 
+// Smoke-сборки идут без Whisper: финальный QA (повторная расшифровка финала) выключен.
+function lessonSmokeBuildArgs({ source, lessonBrief, lessonId, lessonDir }) {
+  return [source, '--template', 'lesson', '--brief', lessonBrief, '--frames', '75',
+    '--id', lessonId, '--outdir', lessonDir, '--no-final-qa'];
+}
+
+function dynamicSmokeBuildArgs({ sourcePath, scenario, projectDir }) {
+  return [sourcePath, '--scenario', scenario, '--project-dir', projectDir, '--version-label', 'smoke',
+    '--frames', '75', '--no-transcribe', '--no-final-qa'];
+}
+
 function runReleaseSmoke({ root = ROOT, id = `${Date.now()}-${process.pid}-${randomUUID().slice(0, 8)}` } = {}) {
   const resolvedRoot = path.resolve(root);
   const protectedBefore = snapshotFiles(resolvedRoot, PROTECTED_FILES);
@@ -228,14 +239,9 @@ function runReleaseSmoke({ root = ROOT, id = `${Date.now()}-${process.pid}-${ran
   const projectDir = path.join(resolvedRoot, 'projects', `release-dynamic-smoke-${id}`);
   let completed = false;
   try {
-    runNodeTool(path.join(resolvedRoot, 'scripts', 'build.js'), [
-      source,
-      '--template', 'lesson',
-      '--brief', lessonBrief,
-      '--frames', '75',
-      '--id', lessonId,
-      '--outdir', lessonDir,
-    ], { cwd: resolvedRoot, env: childEnv, stage: 'release lesson smoke' });
+    runNodeTool(path.join(resolvedRoot, 'scripts', 'build.js'),
+      lessonSmokeBuildArgs({ source, lessonBrief, lessonId, lessonDir }),
+      { cwd: resolvedRoot, env: childEnv, stage: 'release lesson smoke' });
     assertMedia(lessonFinal, 75, null, childEnv);
 
     const workspace = createOrOpenProject({
@@ -250,14 +256,9 @@ function runReleaseSmoke({ root = ROOT, id = `${Date.now()}-${process.pid}-${ran
       scenarioPath,
       fs.constants.COPYFILE_EXCL,
     );
-    runNodeTool(path.join(resolvedRoot, 'scripts', 'build.js'), [
-      workspace.sourcePath,
-      '--scenario', path.relative(workspace.dir, scenarioPath),
-      '--project-dir', workspace.dir,
-      '--version-label', 'smoke',
-      '--frames', '75',
-      '--no-transcribe',
-    ], { cwd: resolvedRoot, env: childEnv, stage: 'release dynamic smoke' });
+    runNodeTool(path.join(resolvedRoot, 'scripts', 'build.js'),
+      dynamicSmokeBuildArgs({ sourcePath: workspace.sourcePath, scenario: path.relative(workspace.dir, scenarioPath), projectDir: workspace.dir }),
+      { cwd: resolvedRoot, env: childEnv, stage: 'release dynamic smoke' });
     const projectFinal = assertProjectFinal(workspace.dir);
     assertMedia(projectFinal, 75, null, childEnv);
     const motion = runMotionReleaseSmoke({ root: resolvedRoot, workDir: path.join(resolvedRoot, 'out/release-smoke', id, 'motion') });
@@ -300,6 +301,8 @@ module.exports = {
   assertMedia,
   assertProjectFinal,
   assertProtectedFilesUnchanged,
+  dynamicSmokeBuildArgs,
+  lessonSmokeBuildArgs,
   probeMedia,
   runReleaseSmoke,
   snapshotFiles,

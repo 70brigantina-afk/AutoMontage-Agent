@@ -115,6 +115,36 @@ function managedInvocation(command, args, options = {}, { controlChannel = false
         return error ? Object.assign(new Error(error.message), { code: error.code }) : null;
       } catch (_) { return null; }
     },
+    // Аварийный конец (таймаут, сигнал, ненулевой код): kill(-pgid) супервизора не достаёт групп,
+    // которые потомки создали сами (Remotion запускает Chrome с detached: true), а на macOS их не
+    // добивает и setpriv. Такая сирота держала бы слот до AUTOMONTAGE_HEAVY_WAIT_MS. Убиваем все
+    // группы из тикетов именно этого вызова (префикс context.id) и коротко ждём их исчезновения.
+    reapOwnedGroups({ waitMs = 2000 } = {}) {
+      if (process.platform === 'win32') return [];
+      const groups = new Set();
+      for (const context of contexts) {
+        let entries;
+        try { entries = fs.readdirSync(context.dir); } catch (_) { continue; }
+        for (const entry of entries) {
+          if (!entry.startsWith(`${context.id}-`)) continue;
+          try {
+            const ticket = readJson(path.join(context.dir, entry));
+            if (ticket.token === context.token && Number.isInteger(ticket.pgid) && ticket.pgid > 0
+              && ticket.pgid !== process.pid) groups.add(ticket.pgid);
+          } catch (_) { /* недописанный тикет: группы ещё нет */ }
+        }
+      }
+      const alive = (pgid) => {
+        try { process.kill(-pgid, 0); return true; } catch (error) { return error.code !== 'ESRCH'; }
+      };
+      for (const pgid of groups) {
+        try { process.kill(-pgid, 'SIGKILL'); } catch (_) { /* ESRCH – группы уже нет */ }
+      }
+      const end = Date.now() + waitMs;
+      const pause = new Int32Array(new SharedArrayBuffer(4));
+      while ([...groups].some(alive) && Date.now() < end) Atomics.wait(pause, 0, 0, 20);
+      return [...groups];
+    },
     complete(success) {
       // Windows has no kill(-pgid, 0). Only ordinary successful completion observed
       // by the original live orchestrator can clear this invocation's tickets.

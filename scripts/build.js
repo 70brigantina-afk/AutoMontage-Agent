@@ -12,6 +12,7 @@
 //   --no-transcribe   : пропустить whisper (не качать модель); транскрипт = пустой.
 //                       Осмысленно только с --scenario (блоки берутся из готового листа).
 //   --title "текст"   : заголовок видео для шаблона lesson (плашка сверху).
+//   --no-final-qa     : не расшифровывать готовый финал повторно (отчёт qa/final-*.txt).
 const fs = require('fs');
 const { randomUUID } = require('node:crypto');
 const path = require('path');
@@ -56,6 +57,7 @@ const {
 const { withPublicMediaLease } = require('./public-media');
 const { withRenderMediaBundle } = require('./render-media-bundle');
 const { verifyBriefBrollMedia } = require('./lesson/broll-media-files');
+const { runFinalQaSync } = require('./qa/final-qa');
 
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : d; };
@@ -141,6 +143,21 @@ const framesOverride = buildOptions.framesOverride;
 const scenarioFile = opt('scenario', null);
 
 const log = (m) => console.log('· ' + m);
+// Финальный QA: повторная расшифровка готового MP4 отдельным процессом (scripts/qa/final-qa.js).
+// Только предупреждения: любой сбой – строка в логе, финал публикуется как обычно.
+// render – данные рендера для замера надписей (G14/G15): та же композиция, props и public. Зовётся
+// внутри колбэка lease, пока его publicDirectory ещё существует. durationSec – длительность финала
+// для предела времени дочернего QA.
+const finalQa = (finalFile, hasMusic, render = null, durationSec = null) => runFinalQaSync({
+  enabled: !args.includes('--no-final-qa'),
+  projectDir: buildContext.project ? buildContext.project.dir : null,
+  finalPath: finalFile,
+  hasMusic,
+  model,
+  render,
+  durationSec,
+  log,
+});
 const runNodeCapture = (script, scriptArgs, stage = script) => captureTool(
   process.execPath,
   [path.join(ROOT, 'scripts', script), ...scriptArgs.map(String)],
@@ -495,6 +512,15 @@ if (lessonAction === 'render') {
           fs.copyFileSync(mixedMp4L, outMp4L);
           fs.unlinkSync(mixedMp4L);
         }
+        finalQa(outMp4L, Boolean(prepared.music), {
+          entry: 'src/index.js',
+          compositionId: prepared.composition,
+          propsPath: lessonPropsPath,
+          publicDir: lease.publicDirectory,
+          fps: prepared.props.fps,
+          width: prepared.props.width,
+          height: prepared.props.height,
+        }, prepared.props.durationInFrames / prepared.props.fps);
         return outMp4L;
       })
     ));
@@ -681,6 +707,7 @@ try {
     ], { cwd: ROOT, stage: 'dynamic finish' });
 
     // 10. (опц.) фоновая музыка с ducking (Фаза 2.2)
+    let musicMixed = false;
     if (props.audio && props.audio.music && props.audio.music.file) {
       const m = props.audio.music;
       const d = m.ducking || {};
@@ -706,10 +733,21 @@ try {
         ], { cwd: ROOT, stage: 'dynamic music mix' });
         fs.copyFileSync(musTmp, outMp4);
         fs.unlinkSync(musTmp);
+        musicMixed = true;
       } else {
         log(`⚠️ музыка не найдена: ${musPath} – пропускаю`);
       }
     }
+    // Dynamic рендерится без --public-dir (и порциями тоже): public/ корня движка.
+    finalQa(outMp4, musicMixed, {
+      entry: 'src/index.js',
+      compositionId: 'Dynamic',
+      propsPath,
+      publicDir: path.join(ROOT, 'public'),
+      fps: FPS,
+      width: W,
+      height: H,
+    }, durF / FPS);
     return outMp4;
     });
     if (outDir) {   // глобальный запуск: положить результат рядом с пользователем

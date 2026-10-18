@@ -267,6 +267,27 @@ FFmpeg нет `libx264`, чтобы тесты не пропустились м�
 кадров после склейки), а `tests/takes-master-media.test.js` проверяет дубль, у которого видео
 начинается позже звука, и дубль, взятый назад во времени; оба файла проверены на FFmpeg 6.1,
 7.1 и 9.0.
+`tests/qa-final.test.js` закрывает финальный QA с заглушками Whisper и ffmpeg: отчёт
+`qa/final-*.json|txt` с F1–F5, пропуск F2/F3 без активной расшифровки и F5 с музыкой, звук между
+словами, сбой раннера (лог `final QA не выполнен`, отчёт с `error`, код 0 в режиме сборки),
+`automontage qa-final` без папки (код 2), вызов из `build.js` для lesson и Dynamic (композиция,
+props и public рендера в `--render-json`, строка «финал собран, идёт проверка») и с `--no-final-qa`,
+предел времени дочернего процесса (`finalQaTimeoutMs`) и остановку зависшей проверки по таймауту.
+Остальные тесты финального QA и справочника движения:
+
+- `tests/qa-final-transcript-gates.test.js` – чистые гейты F1–F5: нормализация слов, выравнивание
+  Майерса (6000 × 6000 слов быстрее 2 с), пороги дублей, пропавших слов, пауз и звука без слов,
+  короткая note F3 (первые 8 слов и «… (+N)»), не больше 10 spans;
+- `tests/qa-cover-frame-gate.test.js` – G13 «Обложка – кадр 0»: чёрный, однотонный и обычный кадр,
+  сбой замера даёт warn; замер `frameStats` на настоящем ffmpeg, если он есть;
+- `tests/qa-text-layout-gates.test.js` – G14 (warn за безопасной зоной или при обрезке, стороны и
+  пиксели в note, 16:9) и G15 (наложение больше 4 %, подпись и подложка – одна группа);
+- `tests/qa-text-boxes.test.js` – выбор кадров, сбор рамок с заглушками Chrome, разметка
+  `data-qa-text` в блоках движка, `--render-json`; кейс с настоящим Chrome – только по флагу
+  `AUTOMONTAGE_TEST_MOTION_RENDER=1` (см. ниже);
+- `tests/motion-craft-instructions.test.js` – справочник `motion-craft.md`: разделы, числа против
+  кода `src/motion-kit/` (вход маской 8 кадров, пружины `fly` и `pop`), версия Remotion, ссылки из
+  motion-скиллов и `AGENTS.md`, копии `motion-reel`, без длинного тире и личных путей.
 `tests/project-clean.test.js` закрывает `automontage clean`: правила уровней `renders` и
 `archive`, сохранение финала, оригинала и активной ревизии, прокси b-roll и материалов текущего ТЗ,
 копий спикера без исходника рядом, ревизий legacy-проекта, текущего preview и видео карточек пульта;
@@ -1059,13 +1080,15 @@ Pexels подменён. `tests/qa-preview.test.js` в той же маске �
 текущей папки; из другой папки он начинает скачивать Chrome):
 
 ```bash
-AUTOMONTAGE_TEST_MOTION_RENDER=1 node --test tests/motion-kit-render.test.js tests/layer-render-still.test.js
+AUTOMONTAGE_TEST_MOTION_RENDER=1 node --test tests/motion-kit-render.test.js tests/layer-render-still.test.js tests/qa-text-boxes.test.js
 ```
 
 `motion-kit-render.test.js` проверяет, что кегль субтитров одинаков на каждом кадре и текст не
 обрезается, а `FontLoader` рядом с субтитрами, а не вокруг слоя, роняет рендер.
 `layer-render-still.test.js` снимает кадры 15, 40, 90 и 160 шаблона и требует на них ожидаемые
 тексты kit внутри safe-зоны.
+`qa-text-boxes.test.js` в этом режиме рендерит в Chrome кадр Dynamic с `LabelTop` выше
+безопасной зоны и ждёт G14 warn с id `label-top`.
 Прогон занимает несколько минут и в CI не входит.
 
 В CI Windows-джоб выполняет отдельный шаг «Проверить сборку motion-слоя и границу plan.js»

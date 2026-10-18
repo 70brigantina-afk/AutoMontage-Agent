@@ -40,6 +40,7 @@ metadata:
 ## Сначала покажи выбор монтажа
 
 Прочитай [`reel-turnkey/references/creative-motion.md`](../reel-turnkey/references/creative-motion.md).
+Прочитай [`reel-turnkey/references/motion-craft.md`](../reel-turnkey/references/motion-craft.md) – числа и запреты движения.
 Если маршрут ещё не выбран, сразу покажи карточку **«Как монтируем?»** с тремя вариантами:
 уникальный Creative Motion (рекомендуется), готовый установленный стиль или авторский монтаж
 по механике референса. Если пользователь уже прислал донора и явно попросил повторить его

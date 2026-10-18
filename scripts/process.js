@@ -71,7 +71,13 @@ function invoke(command, args, options, stdioOptions) {
   const result = spawnSyncImpl(invocation.command, invocation.args, invocation.options);
   const launchError = invocation.launchError?.();
   if (launchError) result.error = launchError;
-  invocation.complete?.(!result.error && !result.signal && result.status === 0);
+  const success = !result.error && !result.signal && result.status === 0;
+  // reapOnFailure: после аварийного конца добить группы процессов, которые потомки создали сами
+  // (detached Chrome), иначе они держат тяжёлый слот. Ошибка добивания не должна менять исход.
+  if (!success && options.reapOnFailure) {
+    try { invocation.reapOwnedGroups?.(); } catch (_) { /* слот освободит восстановление очереди */ }
+  }
+  invocation.complete?.(success);
   return assertProcessResult(result, { command, stage });
 }
 
