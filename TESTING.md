@@ -1111,7 +1111,7 @@ Pexels подменён. `tests/qa-preview.test.js` в той же маске �
 текущей папки; из другой папки он начинает скачивать Chrome):
 
 ```bash
-AUTOMONTAGE_TEST_MOTION_RENDER=1 node --test tests/motion-kit-render.test.js tests/layer-render-still.test.js tests/qa-text-boxes.test.js
+AUTOMONTAGE_TEST_MOTION_RENDER=1 node --test tests/motion-kit-render.test.js tests/layer-render-still.test.js tests/qa-text-boxes.test.js tests/qa-moment-stills.test.js
 ```
 
 `motion-kit-render.test.js` проверяет, что кегль субтитров одинаков на каждом кадре и текст не
@@ -1120,6 +1120,8 @@ AUTOMONTAGE_TEST_MOTION_RENDER=1 node --test tests/motion-kit-render.test.js tes
 тексты kit внутри safe-зоны.
 `qa-text-boxes.test.js` в этом режиме рендерит в Chrome кадр Dynamic с `LabelTop` выше
 безопасной зоны и ждёт G14 warn с id `label-top`.
+`qa-moment-stills.test.js` в этом режиме создаёт слой из шаблона 1080×1920, проходит `layer check`
+и рисует два кадра критика из композиции; оба кадра должны быть 405×720.
 Прогон занимает несколько минут и в CI не входит.
 
 В CI Windows-джоб выполняет отдельный шаг «Проверить сборку motion-слоя и границу plan.js»
@@ -1136,3 +1138,39 @@ AUTOMONTAGE_TEST_MOTION_RENDER=1 node --test tests/motion-kit-render.test.js tes
 4. Глазами в preview – кадры входов и выходов карточек и вставок, первые 3 с (спикер виден),
    стыки вставок (спикер резкий до закрытия вставки), громкость эффектов и музыки под речью.
 5. После правок пульта – полоски `qa/sheet-<…>-comment-<id>.jpg` вокруг каждой правки.
+6. Цикл критика идёт до рендера preview и слоя: `automontage layer check` без ❌ → `automontage
+   layer sheet --mode moments --project-dir projects/<ролик>` (по умолчанию `--source stills`)
+   рисует кадры из композиции последнего слоя или черновика ТЗ motion-reel: кадры
+   `qa/moments-stills-<sha8>/`, лист и телефонный лист `qa/moments-stills-<sha8>*.jpg` и индекс
+   `qa/moments-stills-<sha8>.json`. Без пройденного `layer check` к текущему манифесту, у урока и
+   при `--layer` у motion-reel команда отвечает кодом 2. Для ТЗ с одной длинной сценой к событиям
+   добавляются равномерные кадры. Затем критик, его отчёт проверяет `automontage critic
+   --project-dir projects/<ролик> --report <файл.json>`, правки трёх худших сцен и снова
+   `layer check` → кадры → критик, не больше трёх кругов. Видео внутри цикла не рендерится:
+   `layer render`, `layer import`, `layer brief` и `automontage preview` – один раз после решения
+   «остановиться». `critic` отвечает кодом 2 для отчёта к другому preview, к устаревшим кадрам
+   stills (не последний `qa/moments-stills-*.json`, кадры не последнего слоя или после правки
+   `src/` либо ТЗ), к уже оценённому предмету и для отчёта с ошибкой оценок; при успехе печатает
+   решение «исправлять» или «остановиться» и пишет `qa/critic-NN.json|txt`. Кадры готового preview
+   (`--source preview`, файлы `qa/moments-<sha8>*`) – отдельная цепочка кругов со своим счётом.
+
+Автотесты цикла критика (без Remotion):
+
+- `tests/qa-key-moments.test.js` – моменты из манифеста и ТЗ, отрывок, слияние, предел 48,
+  равномерные кадры для длинной сцены, ссылка элемента без `id`, прореживание по приоритету
+  (сначала равномерные кадры, затем удержания, события последними; внутри типа равномерно по
+  времени);
+- `tests/qa-moment-stills.test.js` – кадры из композиции на заглушках Remotion: один бандл и один
+  браузер, jpeg 85 и 720 px, уборка при сбое, отпечаток `inputsSha256` (план, props, исходник,
+  `srcSha256` всей `src/` слоя, медиа сцен motion-reel), отказы с кодом 2 (урок, нет манифеста,
+  устаревший манифест, `layer check` не пройден или к другому манифесту, `--layer` у motion-reel),
+  устаревание индекса после правки `src/` и при новом слое;
+- `tests/layer-sheet-moments.test.js` – `layer sheet --mode moments` на настоящем ffmpeg: размеры
+  кадров, лист 4 колонки, телефонный лист 360 px, индекс с `previewSha256`;
+- `tests/qa-critic.test.js` – проверка отчёта, оценки, решение и правила остановки, цепочка
+  кругов, повторный отчёт к тому же preview, предмет `stills` или `preview` с отдельными цепочками
+  кругов, отчёт к устаревшим кадрам stills;
+- `tests/render-media-bundle.test.js` – lease медиа черновика motion-reel, через который рисуются
+  кадры stills, держится до завершения операции и убирается и при успехе, и при сбое;
+- `tests/motion-critic-instructions.test.js` – задание критика, определение субагента (только
+  чтение) и копии motion-reel в `.agents/` и `.codex/`.

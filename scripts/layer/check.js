@@ -1,5 +1,7 @@
 // automontage layer check – гейты по плану слоя за секунды, без рендера: plan.js → манифест kit →
 // G1–G5, G9–G11. Пишет <слой>/out/manifest.json (по нему layer render судит звук) и qa-отчёт.
+// Манифест пишется до гейтов, поэтому кадры критика (layer sheet --source stills) смотрят ещё и отчёт
+// qa/layer-<слой>-check.json: без провала и именно к этому манифесту (inputs[role=manifest].sha256).
 // Код: 0 – пройдено или только предупреждения, 1 – стоп, 2 – оценить нельзя.
 const fs = require('node:fs');
 const path = require('node:path');
@@ -8,7 +10,7 @@ const { buildLayerManifest } = require('../motion-kit-node');
 const { getProfile } = require('../qa/profiles');
 const { buildReport, exitCodeFor, formatReport, writeReport } = require('../qa/report');
 const { runTimelineGates } = require('../qa/timeline-gates');
-const { assertLayerSource, formatNumber, readLayerJson, relative, resolveLayer, sha256File, writeJson } = require('./common');
+const { assertLayerSource, formatNumber, layerSrcSha256, readLayerJson, relative, resolveLayer, sha256File, writeJson } = require('./common');
 
 const FLAGS = { 'project-dir': 'value', layer: 'value', profile: 'value' };
 
@@ -79,7 +81,10 @@ async function run(options, deps = {}) {
     profileName = options.profile || layer.profile || 'avatar';
     const profile = getProfile(profileName);
     assertLayerSource(target, layer);
-    const manifest = buildManifest(layerDir);
+    // Отпечаток папки src/ – до сборки: правка во время сборки даст старый отпечаток, и кадры критика
+    // (layer sheet --source stills) честно попросят layer check заново.
+    const srcSha256 = layerSrcSha256(layerDir);
+    const manifest = { ...buildManifest(layerDir), srcSha256 };
     const manifestPath = path.join(layerDir, 'out', 'manifest.json');
     writeJson(manifestPath, manifest);
     inputs = [{ role: 'manifest', path: relative(projectDir, manifestPath), sha256: sha256File(manifestPath) }];

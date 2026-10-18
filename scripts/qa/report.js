@@ -154,13 +154,15 @@ function projectQaDir(projectDir, { create = false, fileSystem = fs } = {}) {
   return dir;
 }
 
-function writeReport(projectDir, name, report, fileSystem = fs) {
+// format – необязательный построитель текста для .txt (по умолчанию formatReport отчётов гейтов);
+// отчёт критика передаёт свой, потому что у него нет gates.
+function writeReport(projectDir, name, report, fileSystem = fs, format = formatReport) {
   if (!REPORT_NAME.test(name)) throw new Error(`имя отчёта «${name}» недопустимо`);
   const dir = projectQaDir(projectDir, { create: true, fileSystem });
   const jsonPath = path.join(dir, `${name}.json`);
   const textPath = path.join(dir, `${name}.txt`);
   writeAtomic(jsonPath, `${JSON.stringify(report, null, 2)}\n`, fileSystem);
-  writeAtomic(textPath, `${formatReport(report)}\n`, fileSystem);
+  writeAtomic(textPath, `${format(report)}\n`, fileSystem);
   return { jsonPath, textPath };
 }
 

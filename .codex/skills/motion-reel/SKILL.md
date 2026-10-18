@@ -170,6 +170,20 @@ Remote URL и неподтверждённый файл не подставля�
 Во всех примерах `<id>` и `vNN` замени фактическими путями последней ревизии из `project.json`.
 Команды `node scripts/...` выполняй из корня движка.
 
+**Цикл критика** (до рендера preview). Кадры рисуются прямо из композиции черновика ТЗ, без
+рендера видео: `automontage layer sheet --mode moments --project-dir projects/<id>` кладёт кадры
+ключевых моментов, лист и телефонный лист в `qa/moments-stills-*`. Запусти субагента
+`motion-critic` (в Codex – отдельного агента с заданием из
+[`motion-critic.md`](../reel-turnkey/references/motion-critic.md)); передай ему путь к свежему
+`qa/moments-stills-<sha8>.json`, который напечатал `layer sheet`, и номер круга. Он только читает
+кадры и отвечает JSON-отчётом. Сохрани ответ в файл и прогони `automontage critic --project-dir
+projects/<id> --report <файл.json>`: команда сверяет отчёт с последними кадрами и текущим ТЗ и
+печатает решение. При `fix` («Решение: исправлять») исправь три названные худшие сцены новой
+draft-ревизией ТЗ и снова нарисуй кадры → критик (не больше трёх кругов). Внутри цикла только кадры:
+рендер видео внутри цикла запрещён (`automontage preview` до решения критика не запускай). При
+`stop` («Решение: остановиться») собери preview: он рендерится один раз после `stop`. В сообщении
+пользователю назови оценки и причину остановки.
+
 ```bash
 automontage preview --project-dir projects/<id> --brief brief/vNN-draft.motion.json
 node scripts/qa-preview.js --project-dir projects/<id>
@@ -255,13 +269,27 @@ Master – один раз из оригинала: `--edit edit/roughcut-vNN.js
 2. `automontage layer check --project-dir projects/<папка> --layer motion-vNN` – после каждой
    правки плана, за секунды: ритм, safe-zone, спикер в хуке, звуки, сток, чужое видео. Сток под
    вставку – `automontage layer stock` (без `PEXELS_API_KEY` клип кладут вручную).
-3. `automontage layer render` – ждёт слот машинной очереди, проверяет длину слоя и голос в его звуке.
+3. **Цикл критика** (до рендера preview). Кадры рисуются прямо из композиции слоя, без рендера
+   видео: `automontage layer sheet --mode moments --project-dir projects/<папка> --layer motion-vNN`
+   кладёт кадры ключевых моментов, лист и телефонный лист в `qa/moments-stills-*` (слой должен
+   пройти `layer check`, иначе команда отказывает). Запусти субагента `motion-critic` (в Codex –
+   отдельного агента с заданием из [`motion-critic.md`](../reel-turnkey/references/motion-critic.md)); передай ему путь к
+   свежему `qa/moments-stills-<sha8>.json`, который напечатал `layer sheet`, и номер круга. Он только
+   читает кадры и отвечает JSON-отчётом. Сохрани ответ в файл и прогони `automontage critic
+   --project-dir projects/<папка> --report <файл.json>`: команда сверяет отчёт с последними кадрами и
+   печатает решение. При `fix` («Решение: исправлять») исправь три названные худшие сцены в плане
+   слоя, затем снова `layer check` → `layer sheet --mode moments` → критик (не больше трёх кругов).
+   Внутри цикла только кадры: рендер видео внутри цикла запрещён (ни `layer render`, ни
+   `automontage preview`). При `stop` («Решение: остановиться») переходи к рендеру: preview
+   рендерится один раз после `stop`. В сообщении пользователю назови оценки и причину остановки.
+4. `automontage layer render` – ждёт слот машинной очереди, проверяет длину слоя и голос в его звуке.
    Тяжёлые команды (`layer render`, `layer import`, preview, final и master) запускай в фоне;
    при ожидании смотри `automontage queue`. `layer render --no-wait` сразу отказывает, если
    очередь занята; это не обход ограничения.
-4. `automontage layer import` → `automontage layer brief` → `automontage preview`. Preview
-   проверяет баланс голоса и музыки; при стопе он не публикуется, в пульте остаётся прошлый.
-5. `automontage layer sheet --project-dir projects/<папка>` – контакт-лист текущего preview и
+5. `automontage layer import` → `automontage layer brief` → `automontage preview`. Preview
+   рендерится один раз после `stop` цикла критика; он проверяет баланс голоса и музыки; при стопе
+   он не публикуется, в пульте остаётся прошлый.
+6. `automontage layer sheet --project-dir projects/<папка>` – контакт-лист текущего preview и
    кадры вокруг новых правок пульта к нему. Команда только предупреждает.
 
 В пульт уходит только preview, у которого отчёты `layer check`, `layer render` и `preview` в
@@ -275,8 +303,8 @@ G8. Попросили музыку слышнее – подними `music.gai
 подсказке про `music.gainDb` или покажи число владельцу.
 
 Правку из пульта вноси в тот же слой (новый слой – только при новом исходнике), затем снова
-`layer check` → `layer render` → `layer import` → `layer brief` → `automontage preview` и
-`automontage inbox --accept`. Утверждает только владелец: «Утверждаю» в пульте или «утверждаю»
+`layer check` → цикл критика → `layer render` → `layer import` → `layer brief` →
+`automontage preview` и `automontage inbox --accept`. Утверждает только владелец: «Утверждаю» в пульте или «утверждаю»
 в чате.
 
 ## Пульт роликов

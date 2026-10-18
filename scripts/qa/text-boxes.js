@@ -172,5 +172,5 @@ async function collectTextBoxes({
 }
 
 module.exports = {
-  FALLBACK_FRAMES, MIN_OPACITY, TEXT_FRAMES_MAX, TEXT_SELECTOR, collectTextBoxes, pickTextFrames, toBoxes,
+  FALLBACK_FRAMES, MIN_OPACITY, TEXT_FRAMES_MAX, TEXT_SELECTOR, collectTextBoxes, defaultDeps, pickTextFrames, toBoxes,
 };

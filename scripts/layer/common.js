@@ -1,3 +1,4 @@
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { assertCompositionId } = require('../build-commands');
@@ -105,6 +106,29 @@ function readLayerJson(layerDir) {
   return layer;
 }
 
+// sha256 всего дерева <слой>/src (plan.js, words.js, sfx-library.js, свои компоненты): пути по
+// алфавиту, у файла – путь, длина и байты, у ссылки – путь и цель. layer check кладёт его в манифест
+// (srcSha256), кадры критика сверяют: любая правка src/ после layer check – манифест устарел.
+function layerSrcSha256(layerDir) {
+  const hash = crypto.createHash('sha256');
+  const walk = (dir, rel) => {
+    for (const name of fs.readdirSync(dir).sort()) {
+      const full = path.join(dir, name);
+      const relName = rel ? `${rel}/${name}` : name;
+      const stat = fs.lstatSync(full);
+      if (stat.isDirectory()) walk(full, relName);
+      else if (stat.isSymbolicLink()) hash.update(`l\0${relName}\0${fs.readlinkSync(full)}\0`);
+      else if (stat.isFile()) {
+        const bytes = fs.readFileSync(full);
+        hash.update(`f\0${relName}\0${bytes.length}\0`);
+        hash.update(bytes);
+      }
+    }
+  };
+  walk(path.join(layerDir, 'src'), '');
+  return hash.digest('hex');
+}
+
 // Стриминг кусками по 1 МиБ (renders весят сотни МБ) – та же hashFile, что уже считает sha256
 // превью и финалов в пульте, вместо повторного чтения всего файла в память.
 const sha256File = hashFile;
@@ -162,5 +186,5 @@ const markdownCell = (value) => String(value).replace(/\r\n|\r|\n|\t/gu, ' ').re
 const formatNumber = (value) => String(Number(Number(value).toFixed(2))).replace('.', ',');
 
 module.exports = {
-  LAYER_NAME, assertLayerSource, formatNumber, markdownCell, nextLayerName, projectFrom, readJson, readLayerJson, relative, resolveLayer, sha256File, writeJson,
+  LAYER_NAME, assertLayerSource, formatNumber, layerSrcSha256, markdownCell, nextLayerName, projectFrom, readJson, readLayerJson, relative, resolveLayer, sha256File, writeJson,
 };

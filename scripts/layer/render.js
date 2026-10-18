@@ -225,4 +225,4 @@ function renderClaimed({ projectDir, layerName, sourcePath, profile, profileName
   return exitCode;
 }
 
-module.exports = { FLAGS, claimRender, run };
+module.exports = { FLAGS, claimRender, readCheckedManifest, run };
