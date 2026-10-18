@@ -107,3 +107,10 @@ test('параметр max ограничивает число моментов'
   const texts = Array.from({ length: 10 }, (_, i) => text(`title-${i + 1}`, i * 50, 40));
   assert.equal(keyMoments({ manifest: manifestFixture({ seconds: 25, texts }), durationSec: 25, max: 5 }).length, 5);
 });
+
+test('ТЗ в отрывке: сцены сдвигаются на fromSec, вне отрывка отбрасываются', () => {
+  const brief = { scenes: [{ scene: 'fullscreen', start: 0, end: 3 }, { scene: 'split', start: 3, end: 6 }] };
+  // Отрывок с 3-й секунды длиной 3 с: первая сцена целиком до отрывка, вторая начинается в нуле.
+  assert.deepEqual(momentsFromBrief(brief, { fromSec: 3, durationSec: 3 }).map((m) => m.timeSec), [0.3, 1.5]);
+  assert.deepEqual(keyMoments({ brief, fromSec: 3, durationSec: 3 }).map((m) => m.timeSec), [0.3, 1.5]);
+});

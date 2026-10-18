@@ -51,9 +51,11 @@ function sceneText(scene) {
   return parts.filter((part) => typeof part === 'string' && part.trim()).join(' ').trim().slice(0, LABEL_TEXT_MAX);
 }
 
-function momentsFromBrief(brief, { durationSec } = {}) {
+// Сцены ТЗ лежат в глобальном времени композиции (отрывок preview вырезает кадры fromFrame..toFrame
+// из полной сборки), поэтому для отрывка их сдвигают на fromSec, как и моменты манифеста.
+function momentsFromBrief(brief, { fromSec = 0, durationSec } = {}) {
   const scenes = brief && Array.isArray(brief.scenes) ? brief.scenes : [];
-  const range = { fromSec: 0, durationSec };
+  const range = { fromSec, durationSec };
   const out = [];
   scenes.forEach((scene, index) => {
     if (!scene || !finite(scene.start) || !finite(scene.end) || scene.end <= scene.start) return;
@@ -93,7 +95,7 @@ function thin(list, max) {
 
 function keyMoments({ manifest = null, brief = null, fromSec = 0, durationSec, max = MAX_MOMENTS } = {}) {
   let moments = momentsFromManifest(manifest, { fromSec, durationSec });
-  if (!moments.length) moments = momentsFromBrief(brief, { durationSec });
+  if (!moments.length) moments = momentsFromBrief(brief, { fromSec, durationSec });
   if (!moments.length) {
     moments = finite(durationSec) && durationSec > 0
       ? sheetTimes(durationSec, EVEN_COUNT).map((timeSec, i) => ({ timeSec, kind: 'even', ref: `even-${i + 1}`, label: `кадр ${i + 1} из ${EVEN_COUNT}` }))

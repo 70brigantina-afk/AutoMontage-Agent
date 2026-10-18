@@ -13,9 +13,15 @@ const { resolveProjectPath } = require('../project/workspace');
 const { buildReport, formatReport, projectQaDir } = require('../qa/report');
 const { EDGE_THRESHOLD, EDGE_WIDTH, emptyFrameGate } = require('../qa/empty-frame-gate');
 const { safeRect } = require('../qa/safe-rect');
-const { projectFrom } = require('./common');
+const { LAYER_NAME, projectFrom, readJson, relative, writeJson } = require('./common');
 
-const FLAGS = { 'project-dir': 'value' };
+const FLAGS = { 'project-dir': 'value', mode: 'value' };
+const MODES = ['even', 'moments'];
+
+// Кадр для критика: длинная сторона 720 px; телефонная копия листа – кадр шириной 360 px.
+const CRITIC_LONG_SIDE = 720;
+const PHONE_WIDTH = 360;
+const SHEET_COLUMNS = 4;
 const QUIET = ['-hide_banner', '-loglevel', 'error', '-y'];
 
 // Середины 16 равных отрезков ролика: sheetTimes(16) в тесте – это sheetTimes(duration = 16).
@@ -161,8 +167,110 @@ function buildSheet({ videoPath, width, height, duration, fps, outDir, name, com
   }
 }
 
+// Лист ключевых моментов: по одному ffmpeg на момент даёт три копии кадра – для критика (720 px по
+// длинной стороне, без рамки), для листа (миниатюра с рамкой safe-зоны) и для телефонного листа
+// (ширина 360 px). Секунды зажаты в [0, lastFrameSec], как в buildSheet. projectDir нужен только для
+// относительных путей индекса; previewSha256 привязывает индекс к конкретному preview.
+function buildMomentSheet({ videoPath, width, height, duration, fps, moments, outDir, name, projectDir = path.dirname(outDir), previewSha256 = null, log = console.warn }) {
+  const { thumbW, box } = thumbBox(width, height);
+  const lastFrameSec = Math.max(0, duration - 1 / fps);
+  const clampSeek = (t) => Math.min(Math.max(0, t), lastFrameSec);
+  const framesDir = path.join(outDir, name);
+  fs.rmSync(framesDir, { recursive: true, force: true });
+  fs.mkdirSync(framesDir, { recursive: true });
+  const work = path.join(outDir, `${name}.frames-${process.pid}-${crypto.randomBytes(4).toString('hex')}`);
+  fs.mkdirSync(path.join(work, 'sheet'), { recursive: true });
+  fs.mkdirSync(path.join(work, 'phone'), { recursive: true });
+  try {
+    const criticScale = height > width ? `scale=-2:${CRITIC_LONG_SIDE}` : `scale=${CRITIC_LONG_SIDE}:-2`;
+    const drawbox = `drawbox=x=${box.x}:y=${box.y}:w=${box.w}:h=${box.h}:color=magenta@0.9:t=2`;
+    const entries = [];
+    moments.forEach((moment, i) => {
+      const n = String(i + 1).padStart(2, '0');
+      const file = path.join(framesDir, `${n}-${Number(moment.timeSec.toFixed(3))}.jpg`);
+      const sheetFrame = path.join(work, 'sheet', `f${n}.png`);
+      const phoneFrame = path.join(work, 'phone', `f${n}.png`);
+      const graph = `[0:v]split=3[a][b][c];[a]${criticScale}[o1];[b]scale=${thumbW}:-2,${drawbox}[o2];[c]scale=${PHONE_WIDTH}:-2[o3]`;
+      runTool('ffmpeg', [...QUIET, '-ss', formatSeconds(clampSeek(moment.timeSec)), '-i', videoPath, '-filter_complex', graph,
+        '-map', '[o1]', '-frames:v', '1', file, '-map', '[o2]', '-frames:v', '1', sheetFrame, '-map', '[o3]', '-frames:v', '1', phoneFrame], { stage: 'moment frame' });
+      if (![file, sheetFrame, phoneFrame].every((f) => fs.statSync(f, { throwIfNoEntry: false })?.size)) {
+        throw new Error(`moment frame: не удалось получить кадр на ${moment.timeSec.toFixed(2)} с – файл повреждён или кодек не читается`);
+      }
+      entries.push({ file: relative(projectDir, file), timeSec: moment.timeSec, kind: moment.kind, ref: moment.ref, label: moment.label });
+    });
+    const rows = Math.max(1, Math.ceil(moments.length / SHEET_COLUMNS));
+    const sheetPath = path.join(outDir, `${name}.jpg`);
+    const phonePath = path.join(outDir, `${name}-phone.jpg`);
+    runTool('ffmpeg', [...QUIET, '-i', path.join(work, 'sheet', 'f%02d.png'), '-vf', `tile=${SHEET_COLUMNS}x${rows}`, '-frames:v', '1', sheetPath], { stage: 'moment sheet tile' });
+    runTool('ffmpeg', [...QUIET, '-i', path.join(work, 'phone', 'f%02d.png'), '-vf', `tile=${SHEET_COLUMNS}x${rows}`, '-frames:v', '1', phonePath], { stage: 'moment phone tile' });
+    const indexPath = path.join(outDir, `${name}.json`);
+    writeJson(indexPath, { version: 1, previewSha256, moments: entries });
+    const samples = moments.map((moment) => {
+      const t = clampSeek(moment.timeSec);
+      const edgeShare = frameEdgeShare(videoPath, t);
+      return edgeShare === null ? null : { timeSec: t, edgeShare };
+    });
+    log(`кадров для критика: ${entries.length}`);
+    return { sheetPath, phonePath, framesDir, indexPath, gate: emptyFrameGate(samples) };
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+}
+
+// Манифест слоя motion-kit, на котором собран preview: сцена ТЗ ссылается на ассет слоя (brollMedia.src),
+// реестр qa/layer-imports.json знает, из какого слоя он импортирован. Нет слоя или манифест не читается –
+// null, и моменты берутся из сцен ТЗ.
+function layerManifestFor(projectDir, brief, warn) {
+  if (!brief || !Array.isArray(brief.scenes)) return null;
+  const { findByReference } = require('./registry');
+  const { readCheckedManifest } = require('./render');
+  for (const scene of brief.scenes) {
+    const src = scene && scene.brollMedia && scene.brollMedia.src;
+    if (typeof src !== 'string') continue;
+    const entry = findByReference(projectDir, src);
+    if (!entry || !LAYER_NAME.test(String(entry.layer))) continue;
+    try {
+      return readCheckedManifest(projectDir, resolveProjectPath(projectDir, entry.layer, { label: 'layer', mustExist: true, type: 'directory' })).manifest;
+    } catch (error) {
+      warn(`⚠️ манифест слоя ${entry.layer} не прочитан, моменты берутся из сцен ТЗ: ${error.message}`);
+      return null;
+    }
+  }
+  return null;
+}
+
+async function runMoments({ projectDir, current, videoPath, probe, log, warn }) {
+  // key-moments сам берёт sheetTimes из этого файла: ленивый require разрывает круг.
+  const { keyMoments } = require('../qa/key-moments');
+  let brief = null;
+  if (current.briefPath) {
+    try {
+      brief = readJson(resolveProjectPath(projectDir, current.briefPath, { label: 'currentPreview.briefPath', mustExist: true, type: 'file' }), current.briefPath);
+    } catch (error) {
+      warn(`⚠️ ТЗ preview не прочитано, моменты будут равномерными: ${error.message}`);
+    }
+  }
+  const manifest = layerManifestFor(projectDir, brief, warn);
+  const moments = keyMoments({ manifest, brief, fromSec: Number(current.fromSec) || 0, durationSec: probe.durationSec });
+  const result = buildMomentSheet({
+    videoPath, width: probe.width, height: probe.height, duration: probe.durationSec, fps: probe.fps, moments,
+    outDir: projectQaDir(projectDir, { create: true }), name: `moments-${current.sha256.slice(0, 8)}`, projectDir, previewSha256: current.sha256, log: warn,
+  });
+  log(`Лист моментов: ${result.sheetPath}`);
+  log(`Лист для телефона: ${result.phonePath}`);
+  log(`Кадры для критика: ${result.framesDir}`);
+  log(`Индекс моментов: ${result.indexPath}`);
+  log(formatReport(buildReport({ kind: 'sheet', profile: null, gates: [result.gate], inputs: [] })));
+  return 0;
+}
+
 async function run(options, deps = {}) {
   const log = deps.log || console.log;
+  const mode = options.mode === undefined ? 'even' : options.mode;
+  if (!MODES.includes(mode)) {
+    (deps.warn || console.error)(`❌ неизвестный --mode «${mode}»: допустимо even (равномерный контакт-лист, по умолчанию) или moments (ключевые моменты)`);
+    return 2;
+  }
   const { projectDir, manifest } = projectFrom(options);
   const current = manifest.currentPreview;
   if (!current) throw new Error('в проекте нет текущего preview – сначала соберите preview');
@@ -171,6 +279,7 @@ async function run(options, deps = {}) {
   // звук preview длиннее видео на десятые доли секунды, длительность контейнера завысила бы конец
   // ролика, и последний семпл или полоска правки просили бы кадр, которого в видео уже нет.
   const probe = probeMediaPath(videoPath, { stage: 'layer sheet probe' });
+  if (mode === 'moments') return runMoments({ projectDir, current, videoPath, probe, log, warn: deps.warn || console.warn });
   // Правки пульта пишут timeSec как currentTime плеера, то есть уже в секундах ОТ НАЧАЛА того самого
   // файла, что играл браузер (scripts/pult/status.js: video.path === preview.filePath) – сдвигать на
   // currentPreview.fromSec не нужно и неверно для preview-фрагмента. Комментарий к другому видео,
@@ -194,4 +303,4 @@ async function run(options, deps = {}) {
   return 0;
 }
 
-module.exports = { FLAGS, buildSheet, frameEdgeShare, frameStats, run, sheetTimes, thumbBox };
+module.exports = { FLAGS, buildMomentSheet, buildSheet, frameEdgeShare, frameStats, run, sheetTimes, thumbBox };

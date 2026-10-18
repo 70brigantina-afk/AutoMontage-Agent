@@ -10,7 +10,8 @@ const USAGE = `usage: automontage layer new|words|check|render|import|brief|stoc
   layer brief  --project-dir P --asset <assets/broll/video/…/media.mp4> --title T --head-cream C --head-orange O
                [--audio mix|mute] [--music <файл> --music-gain-db -16 --music-start-sec 0]
   layer stock  --project-dir P --layer motion-v01 --query "english" --query-original "фраза" [--insert stock-1] [--sec 2.5] [--pick 1] [--list]
-  layer sheet  --project-dir P                                                контакт-лист preview и кадры правок пульта`;
+  layer sheet  --project-dir P [--mode even|moments]                          контакт-лист preview и кадры правок пульта;
+               moments: кадры ключевых моментов для критика, лист 4 колонки и лист для телефона`;
 
 const COMMANDS = Object.freeze({
   new: './new', words: './words', check: './check', render: './render',
