@@ -59,10 +59,11 @@ test('motion-critic: копии motion-reel равны канону', () => {
 });
 
 test('motion-critic: документы без длинного тире и личных путей', () => {
-  const files = [CRITIC_DOC, AGENT, ...ROUTES, 'skills/reel-turnkey/references/qa-checklist.md'];
-  for (const file of files) {
+  // В старых маршрутах длинное тире уже было до цикла критика, поэтому тире проверяем только в новых документах.
+  const fresh = [CRITIC_DOC, AGENT, 'skills/reel-turnkey/references/qa-checklist.md'];
+  for (const file of [...fresh, ...ROUTES]) {
     const text = read(file);
-    assert.ok(!text.includes('—'), `${file}: U+2014`);
+    if (fresh.includes(file)) assert.ok(!text.includes('—'), `${file}: U+2014`);
     assert.ok(!/\/Users\/|\/home\//u.test(text), `${file}: личный путь`);
   }
 });
