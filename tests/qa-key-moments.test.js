@@ -1,0 +1,109 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { manifestFixture } = require('./helpers/manifest-fixtures');
+const { keyMoments, momentsFromBrief, momentsFromManifest } = require('../scripts/qa/key-moments');
+
+const text = (id, from, length = 50) => ({ id, from, frames: Array.from({ length }, () => [0, 0, 10, 10]) });
+const times = (moments) => moments.map((m) => m.timeSec);
+
+test('манифест: событие текста через 0,3 с и удержание в середине показа', () => {
+  const manifest = manifestFixture({ texts: [text('title-1', 25)] });
+  const moments = momentsFromManifest(manifest, { durationSec: 10 });
+  assert.deepEqual(moments.map((m) => [m.timeSec, m.kind, m.ref]), [[1.3, 'event', 'title-1'], [2, 'hold', 'title-1']]);
+});
+
+test('манифест: вставки и заметные звуки дают события, обычные звуки не учитываются', () => {
+  const manifest = manifestFixture({
+    inserts: [{ id: 'insert-1', kind: 'stock', from: 50, to: 100 }],
+    cues: { kept: [{ id: 'cue-1', hitFrame: 125, notable: true }, { id: 'cue-2', hitFrame: 200, notable: false }], dropped: [] },
+  });
+  const moments = momentsFromManifest(manifest, { durationSec: 10 });
+  assert.deepEqual(moments.map((m) => [m.timeSec, m.kind, m.ref]), [[2.3, 'event', 'insert-1'], [5, 'event', 'cue-1']]);
+});
+
+test('манифест: субтитры с полем until дают удержание по середине [from, until]', () => {
+  const manifest = manifestFixture({ texts: [{ id: 'caption-1', from: 50, until: 150, static: [0, 0, 1, 1] }] });
+  const moments = momentsFromManifest(manifest, { durationSec: 10 });
+  assert.deepEqual(moments.map((m) => [m.timeSec, m.kind]), [[2.3, 'event'], [4, 'hold']]);
+});
+
+test('манифест: отрывок сдвигает моменты на fromSec и отбрасывает элементы вне отрывка', () => {
+  const manifest = manifestFixture({ texts: [text('title-0', 0, 25), text('title-1', 50)] });
+  const moments = momentsFromManifest(manifest, { fromSec: 1, durationSec: 10 });
+  assert.deepEqual(moments.map((m) => [m.timeSec, m.ref]), [[1.3, 'title-1'], [2, 'title-1']]);
+  const first = momentsFromManifest(manifestFixture({ texts: [text('title-1', 25)] }), { fromSec: 1, durationSec: 10 });
+  assert.deepEqual(times(first), [0.3, 1]);
+});
+
+test('манифест: моменты за концом отрывка отбрасываются', () => {
+  const manifest = manifestFixture({ texts: [text('title-1', 25)] });
+  assert.deepEqual(times(momentsFromManifest(manifest, { durationSec: 1.5 })), [1.3]);
+});
+
+test('ТЗ: две сцены 0-3 и 3-6 дают события и удержания', () => {
+  const brief = { scenes: [{ scene: 'text-only', start: 0, end: 3, quoteCream: 'Первая мысль' }, { scene: 'stat', start: 3, end: 6, statCream: '90', headCream: 'процентов' }] };
+  const moments = momentsFromBrief(brief, { durationSec: 6 });
+  assert.deepEqual(times(moments), [0.3, 1.5, 3.3, 4.5]);
+  assert.deepEqual(moments.map((m) => m.kind), ['event', 'hold', 'event', 'hold']);
+  assert.equal(moments[0].ref, 'scenes[0]');
+  assert.equal(moments[2].ref, 'scenes[1]');
+  assert.match(moments[0].label, /^text-only/);
+  assert.ok(moments[0].label.includes('Первая мысль'));
+});
+
+test('ТЗ: подпись обрезает текст до 40 символов', () => {
+  const long = 'я'.repeat(100);
+  const [moment] = momentsFromBrief({ scenes: [{ scene: 'fullscreen', start: 0, end: 2, caption: long }] }, { durationSec: 2 });
+  assert.equal(moment.label, `fullscreen ${'я'.repeat(40)}`);
+});
+
+test('пустые scenes и нет манифеста: 16 равномерных моментов even', () => {
+  const moments = keyMoments({ brief: { scenes: [] }, durationSec: 16 });
+  assert.equal(moments.length, 16);
+  assert.ok(moments.every((m) => m.kind === 'even'));
+  assert.equal(moments[0].timeSec, 0.5);
+  assert.doesNotThrow(() => keyMoments({ durationSec: 8 }));
+});
+
+test('манифест в приоритете над ТЗ', () => {
+  const manifest = manifestFixture({ texts: [text('title-1', 25)] });
+  const brief = { scenes: [{ scene: 'text-only', start: 0, end: 3 }] };
+  assert.deepEqual(times(keyMoments({ manifest, brief, durationSec: 10 })), [1.3, 2]);
+});
+
+test('манифест без моментов уступает ТЗ', () => {
+  const brief = { scenes: [{ scene: 'text-only', start: 0, end: 3 }] };
+  assert.deepEqual(times(keyMoments({ manifest: manifestFixture({}), brief, durationSec: 10 })), [0.3, 1.5]);
+});
+
+test('моменты ближе 0,15 с сливаются, остаётся событие', () => {
+  const manifest = manifestFixture({
+    texts: [text('title-1', 25, 1)],
+    inserts: [{ id: 'insert-1', kind: 'stock', from: 28, to: 80 }],
+  });
+  const moments = keyMoments({ manifest, durationSec: 10 });
+  assert.equal(moments.filter((m) => m.timeSec >= 1.3 && m.timeSec <= 1.5).length, 1);
+  assert.equal(moments.find((m) => m.timeSec >= 1.3 && m.timeSec <= 1.5).kind, 'event');
+});
+
+test('слияние: hold рядом с event заменяется событием', () => {
+  const manifest = manifestFixture({
+    texts: [text('a', 0, 60)], // hold 1.2
+    inserts: [{ id: 'i', kind: 'stock', from: 22, to: 60 }], // event 0.88+0.3=1.18
+  });
+  const moments = keyMoments({ manifest, durationSec: 10 });
+  assert.equal(moments.filter((m) => Math.abs(m.timeSec - 1.2) < 0.1).length, 1);
+  assert.equal(moments.find((m) => Math.abs(m.timeSec - 1.2) < 0.1).kind, 'event');
+});
+
+test('100 текстов: не больше 48 моментов по возрастанию', () => {
+  const texts = Array.from({ length: 100 }, (_, i) => text(`title-${i + 1}`, i * 50, 40));
+  const moments = keyMoments({ manifest: manifestFixture({ seconds: 200, texts }), durationSec: 200 });
+  assert.equal(moments.length, 48);
+  for (let i = 1; i < moments.length; i += 1) assert.ok(moments[i].timeSec > moments[i - 1].timeSec);
+});
+
+test('параметр max ограничивает число моментов', () => {
+  const texts = Array.from({ length: 10 }, (_, i) => text(`title-${i + 1}`, i * 50, 40));
+  assert.equal(keyMoments({ manifest: manifestFixture({ seconds: 25, texts }), durationSec: 25, max: 5 }).length, 5);
+});
