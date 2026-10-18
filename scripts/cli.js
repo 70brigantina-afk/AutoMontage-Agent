@@ -64,6 +64,7 @@ function help() {
                                       собрать ролик из лучших кусков разных дублей
   automontage clean [--level renders|archive] [--yes]
                                       отчёт, что можно удалить у готовых роликов; --yes удаляет
+  automontage critic --project-dir <папка> --report <файл.json>
   automontage qa-final <папка> [--final <mp4>] [--model <имя>] [--music]
                                       повторно расшифровать финал: паразиты, дубли, пропавшие слова,
                                       паузы, вздохи – отчёт qa/final-*.txt (сборка делает это сама)
@@ -241,6 +242,16 @@ function main(argv = process.argv.slice(2)) {
   if (argv[0] === 'qa-final') {
     try {
       execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'qa', 'final-qa.js'), ...argv.slice(1)], {
+        stdio: 'inherit', cwd: process.cwd(), shell: false,
+      });
+    } catch (e) { process.exit(e.status || 1); }
+    process.exit(0);
+  }
+
+  // отчёт агента-критика: проверка, qa/critic-<NN>.json|txt и решение цикла
+  if (argv[0] === 'critic') {
+    try {
+      execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'qa', 'critic.js'), ...argv.slice(1)], {
         stdio: 'inherit', cwd: process.cwd(), shell: false,
       });
     } catch (e) { process.exit(e.status || 1); }
