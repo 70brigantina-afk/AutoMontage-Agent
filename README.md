@@ -607,6 +607,8 @@ automontage layer import --project-dir projects/<ролик> --file projects/<р
 automontage layer brief --project-dir projects/<ролик> --asset <reference> --title … --head-cream … --head-orange …
 automontage preview --project-dir projects/<ролик> --brief brief/vNN-draft.lesson.json
 automontage layer sheet --project-dir projects/<ролик>               # контакт-лист и кадры правок
+automontage layer sheet --mode moments --project-dir projects/<ролик> # кадры ключевых моментов, лист и телефонный лист
+automontage critic --project-dir projects/<ролик> --report <файл.json> # отчёт агента-критика: оценки и решение
 ```
 
 `--title`, `--head-cream` и `--head-orange` – подписи для Markdown и пульта, в видео слоя их
