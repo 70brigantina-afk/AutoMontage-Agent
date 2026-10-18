@@ -72,6 +72,18 @@ test('frames вне 6–15 кадров при 25 fps отклоняются', (
   }
 });
 
+test('схема ограничивает frames 6–15: это кадры эталона 25 fps, а не FPS ролика', () => {
+  const schema = require('../schema/motion-brief.schema.json');
+  const frames = schema.definitions.sceneTransition.properties.frames;
+  assert.equal(frames.minimum, 6);
+  assert.equal(frames.maximum, 15);
+  assert.match(frames.description, /25 fps/);
+  // При 60 fps 15 эталонных кадров – это 36 кадров ролика, и ТЗ остаётся валидным.
+  const at60 = brief({ output: { ...brief().output, fps: 60, durationInFrames: 1320 },
+    scenes: [card(0, 3), card(3, 6, { transition: { type: 'fade', frames: 15 } })] });
+  assert.equal(validateMotionBrief(at60).ok, true, validateMotionBrief(at60).errors.join('; '));
+});
+
 test('переход у первой сцены отклоняется с ошибкой scenes[0].transition', () => {
   const value = brief({ scenes: [card(0, 3, { transition: { type: 'fade' } }), card(3, 6)] });
   const result = validateMotionBrief(value);
@@ -107,6 +119,21 @@ test('неизвестный тип, лишние поля и direction у fade/
     assert.equal(result.ok, false, JSON.stringify(transition));
     assert.ok(result.errors.some((error) => error.includes('scenes/1') || error.includes('scenes[1]')), result.errors.join('; '));
   }
+});
+
+test('Markdown-ТЗ показывает тип, длительность и направление перехода, а cut и отсутствие перехода – нет', () => {
+  const { formatMotionBriefMarkdown } = require('../scripts/motion/brief');
+  const value = brief({ scenes: [card(0, 3), card(3, 6, { transition: { type: 'fade' } }),
+    card(6, 9, { transition: { type: 'slide', frames: 15, direction: 'up' } }),
+    card(9, 12, { transition: { type: 'cut' } }), card(12, 15, { transition: { type: 'push', frames: 6 } })] });
+  assert.equal(validateMotionBrief(value).ok, true);
+  const rows = formatMotionBriefMarkdown(value).split('\n').filter((line) => /^\| 0\d \|/.test(line));
+  assert.equal(rows.length, 5);
+  assert.doesNotMatch(rows[0], /Вход/);
+  assert.match(rows[1], /Вход: fade, 0,4 с/);
+  assert.match(rows[2], /Вход: slide, 0,6 с, вверх/);
+  assert.doesNotMatch(rows[3], /Вход/);
+  assert.match(rows[4], /Вход: push, 0,23 с/);
 });
 
 test('presentationFor отдаёт презентацию и timing на frames кадров', () => {

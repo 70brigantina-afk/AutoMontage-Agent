@@ -250,10 +250,25 @@ function sceneSummary(scene) {
   return [scene.title, scene.action, scene.handle].filter(Boolean).join(' – ');
 }
 
+const DIRECTION_WORDS = { left: 'влево', right: 'вправо', up: 'вверх', down: 'вниз' };
+
+// Строка о входе в сцену для человека, который утверждает ТЗ: тип, длительность в секундах при FPS
+// ролика (тот же пересчёт, что в рендере) и направление у slide/wipe. cut и отсутствие поля – пусто.
+function transitionSummary(scene, index, fps) {
+  const transition = scene?.transition;
+  if (index === 0 || !transition || transition.type === 'cut') return '';
+  const frames = Number.isInteger(transition.frames) ? transition.frames : TRANSITION_FRAMES_25.default;
+  const seconds = Number.isFinite(fps) && fps > 0 ? ref25(frames, fps) / fps : frames / 25;
+  const parts = [transition.type, `${String(Math.round(seconds * 100) / 100).replace('.', ',')} с`];
+  if (DIRECTED_TRANSITIONS.has(transition.type)) parts.push(DIRECTION_WORDS[transition.direction ?? 'left']);
+  return `Вход: ${parts.join(', ')}`;
+}
+
 function formatMotionBriefMarkdown(brief) {
-  const sceneRows = (brief.scenes || []).map((scene, index) => (
-    `| ${String(index + 1).padStart(2, '0')} | ${scene.scene} | ${clock(scene.start)}–${clock(scene.end)} | ${cell(sceneSummary(scene))} |`
-  ));
+  const sceneRows = (brief.scenes || []).map((scene, index) => {
+    const summary = [transitionSummary(scene, index, brief.output?.fps), sceneSummary(scene)].filter(Boolean).join('. ');
+    return `| ${String(index + 1).padStart(2, '0')} | ${scene.scene} | ${clock(scene.start)}–${clock(scene.end)} | ${cell(summary)} |`;
+  });
   return [
     `# Motion Reel: ${brief.title || 'VIDEO'}`,
     '',

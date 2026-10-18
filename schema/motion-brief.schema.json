@@ -158,7 +158,10 @@
       "required": ["type"],
       "properties": {
         "type": { "enum": ["cut", "fade", "slide", "wipe", "push"] },
-        "frames": { "type": "integer", "minimum": 1 },
+        "frames": {
+          "description": "Длительность в кадрах эталона 25 fps (6–15, по умолчанию 10), не в кадрах ролика: при 60 fps 15 означает 36 кадров ролика. Поэтому пределы не зависят от FPS.",
+          "type": "integer", "minimum": 6, "maximum": 15
+        },
         "direction": { "enum": ["left", "right", "up", "down"] }
       }
     },
