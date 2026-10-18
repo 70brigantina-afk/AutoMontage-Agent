@@ -73,7 +73,37 @@ test('манифест в приоритете над ТЗ', () => {
 
 test('манифест без моментов уступает ТЗ', () => {
   const brief = { scenes: [{ scene: 'text-only', start: 0, end: 3 }] };
-  assert.deepEqual(times(keyMoments({ manifest: manifestFixture({}), brief, durationSec: 10 })), [0.3, 1.5]);
+  const moments = keyMoments({ manifest: manifestFixture({}), brief, durationSec: 10 });
+  assert.deepEqual(moments.filter((m) => m.kind !== 'even').map((m) => [m.timeSec, m.kind]), [[0.3, 'event'], [1.5, 'hold']]);
+});
+
+test('ТЗ из одной длинной сцены 0-45: события сохранены и добавлены равномерные кадры', () => {
+  const brief = { scenes: [{ scene: 'broll', start: 0, end: 45 }] };
+  const moments = keyMoments({ brief, durationSec: 45 });
+  assert.ok(moments.length >= 16, `моментов ${moments.length}`);
+  assert.ok(moments.some((m) => m.kind === 'event' && m.timeSec === 0.3));
+  assert.ok(moments.some((m) => m.kind === 'hold' && m.timeSec === 22.5));
+  assert.ok(moments.some((m) => m.kind === 'even'));
+  for (let i = 1; i < moments.length; i += 1) assert.ok(moments[i].timeSec - moments[i - 1].timeSec >= 0.15 - 1e-9);
+});
+
+test('ТЗ с редкими сценами: дыра больше 3 с заполняется равномерными кадрами', () => {
+  const scenes = Array.from({ length: 20 }, (_, i) => ({ scene: 'text-only', start: i, end: i + 1 }));
+  assert.ok(!keyMoments({ brief: { scenes }, durationSec: 20 }).some((m) => m.kind === 'even'));
+  const gap = keyMoments({ brief: { scenes: [...scenes.slice(0, 10), { scene: 'stat', start: 19, end: 20 }] }, durationSec: 20 });
+  assert.ok(gap.some((m) => m.kind === 'even'));
+});
+
+test('манифест: элемент без id получает ссылку по номеру, а не undefined', () => {
+  const manifest = manifestFixture({ texts: [{ from: 25, frames: [[0, 0, 1, 1]] }], inserts: [{ kind: 'stock', from: 50, to: 100 }] });
+  const moments = momentsFromManifest(manifest, { durationSec: 10 });
+  assert.deepEqual(moments.map((m) => m.ref), ['text-1', 'text-1', 'insert-1']);
+  assert.ok(moments.every((m) => !m.label.includes('undefined')));
+});
+
+test('манифест слоя со сцены не с нуля: manifestOffsetSec сдвигает моменты', () => {
+  const manifest = manifestFixture({ texts: [text('title-1', 25)] });
+  assert.deepEqual(times(keyMoments({ manifest, manifestOffsetSec: 2, durationSec: 10 })), [3.3, 4]);
 });
 
 test('моменты ближе 0,15 с сливаются, остаётся событие', () => {
@@ -112,5 +142,6 @@ test('ТЗ в отрывке: сцены сдвигаются на fromSec, вн
   const brief = { scenes: [{ scene: 'fullscreen', start: 0, end: 3 }, { scene: 'split', start: 3, end: 6 }] };
   // Отрывок с 3-й секунды длиной 3 с: первая сцена целиком до отрывка, вторая начинается в нуле.
   assert.deepEqual(momentsFromBrief(brief, { fromSec: 3, durationSec: 3 }).map((m) => m.timeSec), [0.3, 1.5]);
-  assert.deepEqual(keyMoments({ brief, fromSec: 3, durationSec: 3 }).map((m) => m.timeSec), [0.3, 1.5]);
+  const all = keyMoments({ brief, fromSec: 3, durationSec: 3 });
+  assert.deepEqual(all.filter((m) => m.kind !== 'even').map((m) => m.timeSec), [0.3, 1.5]);
 });

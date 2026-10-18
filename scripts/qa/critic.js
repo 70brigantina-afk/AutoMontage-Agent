@@ -133,16 +133,20 @@ function savedChain(projectDir, warn) {
     .filter((e) => e.match)
     .sort((a, b) => Number(a.match[1]) - Number(b.match[1]));
   let chain = [];
+  let last = null;
   for (const entry of entries) {
     let saved = null;
     try { saved = JSON.parse(fs.readFileSync(path.join(dir, entry.name), 'utf8')); } catch { saved = null; }
     if (!isObject(saved) || !isObject(saved.report) || !Array.isArray(saved.report.scenes) || !isObject(saved.decision)) {
       warn(`⚠️ qa/${entry.name} не читается или повреждён: пропускаем его при подсчёте кругов`);
-    } else if (saved.decision.action === 'stop') chain = [];
+      continue;
+    }
+    last = { name: entry.name.replace(/\.json$/u, ''), previewSha256: saved.report.previewSha256 };
+    if (saved.decision.action === 'stop') chain = [];
     else chain.push(saved.report);
   }
   const next = entries.length ? Number(entries[entries.length - 1].match[1]) + 1 : 1;
-  return { chain, next };
+  return { chain, next, last };
 }
 
 function parseArgs(argv) {
@@ -181,7 +185,11 @@ async function main(argv = process.argv.slice(2), { log = console.log, error = c
     return 2;
   }
   try {
-    const { chain: previous, next } = savedChain(projectDir, error);
+    const { chain: previous, next, last } = savedChain(projectDir, error);
+    if (last && last.previewSha256 === report.previewSha256) {
+      error(`❌ отчёт к этому preview уже сохранён (${last.name}); перерендерьте preview после правок`);
+      return 2;
+    }
     const round = previous.length + 1;
     if (report.round !== round) error(`⚠️ в отчёте указан круг ${report.round}, а по сохранённым отчётам это круг ${round}: используем ${round}`);
     // Сохраняем вычисленный номер круга (он может быть и выше третьего: решение тогда «остановиться»).

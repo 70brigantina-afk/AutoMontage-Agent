@@ -219,7 +219,8 @@ function buildMomentSheet({ videoPath, width, height, duration, fps, moments, ou
 
 // Манифест слоя motion-kit, на котором собран preview: сцена ТЗ ссылается на ассет слоя (brollMedia.src),
 // реестр qa/layer-imports.json знает, из какого слоя он импортирован. Нет слоя или манифест не читается –
-// null, и моменты берутся из сцен ТЗ.
+// null, и моменты берутся из сцен ТЗ. Время манифеста отсчитывается от начала слоя, поэтому
+// возвращается и сдвиг offsetSec = scene.start сцены со слоем (`layer brief` пишет start: 0).
 function layerManifestFor(projectDir, brief, warn) {
   if (!brief || !Array.isArray(brief.scenes)) return null;
   const { findByReference } = require('./registry');
@@ -227,12 +228,13 @@ function layerManifestFor(projectDir, brief, warn) {
   for (const scene of brief.scenes) {
     const src = scene && scene.brollMedia && scene.brollMedia.src;
     if (typeof src !== 'string') continue;
-    const entry = findByReference(projectDir, src);
-    if (!entry || !LAYER_NAME.test(String(entry.layer))) continue;
     try {
-      return readCheckedManifest(projectDir, resolveProjectPath(projectDir, entry.layer, { label: 'layer', mustExist: true, type: 'directory' })).manifest;
+      const entry = findByReference(projectDir, src);
+      if (!entry || !LAYER_NAME.test(String(entry.layer))) continue;
+      const { manifest } = readCheckedManifest(projectDir, resolveProjectPath(projectDir, entry.layer, { label: 'layer', mustExist: true, type: 'directory' }));
+      return { manifest, offsetSec: Number.isFinite(scene.start) ? scene.start : 0 };
     } catch (error) {
-      warn(`⚠️ манифест слоя ${entry.layer} не прочитан, моменты берутся из сцен ТЗ: ${error.message}`);
+      warn(`⚠️ манифест слоя для ${src} не прочитан, моменты берутся из сцен ТЗ: ${error.message}`);
       return null;
     }
   }
@@ -250,8 +252,11 @@ async function runMoments({ projectDir, current, videoPath, probe, log, warn }) 
       warn(`⚠️ ТЗ preview не прочитано, моменты будут равномерными: ${error.message}`);
     }
   }
-  const manifest = layerManifestFor(projectDir, brief, warn);
-  const moments = keyMoments({ manifest, brief, fromSec: Number(current.fromSec) || 0, durationSec: probe.durationSec });
+  const layer = layerManifestFor(projectDir, brief, warn);
+  const moments = keyMoments({
+    manifest: layer && layer.manifest, manifestOffsetSec: layer ? layer.offsetSec : 0, brief,
+    fromSec: Number(current.fromSec) || 0, durationSec: probe.durationSec,
+  });
   const result = buildMomentSheet({
     videoPath, width: probe.width, height: probe.height, duration: probe.durationSec, fps: probe.fps, moments,
     outDir: projectQaDir(projectDir, { create: true }), name: `moments-${current.sha256.slice(0, 8)}`, projectDir, previewSha256: current.sha256, log: warn,

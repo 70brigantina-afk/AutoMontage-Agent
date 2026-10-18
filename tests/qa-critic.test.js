@@ -264,6 +264,17 @@ test('CLI: цепочка кругов идёт через смену sha previe
   assert.equal(readSaved(projectDir, 'critic-03.json').decision.action, 'stop');
 });
 
+test('CLI: повторный отчёт к тому же preview отклоняется, ничего не сохраняется', async (t) => {
+  const projectDir = scaffold(t);
+  assert.equal((await runCli(projectDir, report([6, 7, 9]))).code, 0);
+  const again = await runCli(projectDir, report([8, 8, 9], { round: 2 }));
+  assert.equal(again.code, 2);
+  assert.match(again.err, /уже сохранён \(critic-01\).*перерендерьте/u);
+  assert.equal(fs.existsSync(path.join(projectDir, 'qa', 'critic-02.json')), false);
+  rerender(projectDir, OTHER_SHA);
+  assert.equal((await runCli(projectDir, report([8, 8, 9], { round: 2, previewSha256: OTHER_SHA }))).code, 0);
+});
+
 test('CLI: нечитаемый critic-NN.json даёт предупреждение с именем файла и не затирается', async (t) => {
   const projectDir = scaffold(t);
   fs.mkdirSync(path.join(projectDir, 'qa'));

@@ -73,7 +73,8 @@ test('run --mode moments: ТЗ без манифеста, имя moments-<sha8>,
   for (const f of [`${name}.jpg`, `${name}-phone.jpg`, `${name}.json`, name]) assert.ok(fs.existsSync(path.join(qa, f)), f);
   const index = readIndex(projectDir, sha256);
   assert.equal(index.previewSha256, sha256);
-  assert.deepEqual(index.moments.map((m) => m.timeSec), [0.3, 1, 2.3, 3]);
+  assert.deepEqual(index.moments.filter((m) => m.kind !== 'even').map((m) => m.timeSec), [0.3, 1, 2.3, 3]);
+  assert.ok(index.moments.length >= 6, 'ТЗ из двух сцен дополнено равномерными кадрами');
   assert.ok(lines.some((l) => l.includes('G12')));
   assert.ok(lines.some((l) => l.includes(`${name}.jpg`)));
 });
@@ -81,7 +82,7 @@ test('run --mode moments: ТЗ без манифеста, имя moments-<sha8>,
 test('run --mode moments: в отрывке сцены ТЗ сдвигаются на fromSec', { skip: !hasFfmpeg }, async (t) => {
   const { projectDir, sha256 } = scaffold(t, { fromSec: 10 });
   assert.equal(await run({ 'project-dir': projectDir, mode: 'moments' }, { log: () => {} }), 0);
-  assert.deepEqual(readIndex(projectDir, sha256).moments.map((m) => m.timeSec), [0.3, 1, 2.3, 3]);
+  assert.deepEqual(readIndex(projectDir, sha256).moments.filter((m) => m.kind !== 'even').map((m) => m.timeSec), [0.3, 1, 2.3, 3]);
 });
 
 test('run --mode moments: манифест слоя из реестра в приоритете над ТЗ', { skip: !hasFfmpeg }, async (t) => {

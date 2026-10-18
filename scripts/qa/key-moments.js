@@ -8,6 +8,7 @@ const EVENT_DELAY_SEC = 0.3;
 const MERGE_GAP_SEC = 0.15;
 const MAX_MOMENTS = 48;
 const EVEN_COUNT = 16;
+const MAX_GAP_SEC = 3;
 const LABEL_TEXT_MAX = 40;
 
 const r3 = (value) => Math.round(value * 1000) / 1000;
@@ -26,21 +27,26 @@ function momentsFromManifest(manifest, { fromSec = 0, durationSec } = {}) {
   const range = { fromSec, durationSec };
   const out = [];
   const add = (moment) => { if (moment) out.push(moment); };
-  for (const item of Array.isArray(manifest.texts) ? manifest.texts : []) {
-    if (!item || !finite(item.from)) continue;
+  // Элемент без id получает ссылку по номеру, чтобы подпись не стала «undefined: появление».
+  const refOf = (item, prefix, index) => (typeof item.id === 'string' && item.id.trim() ? item.id : `${prefix}-${index + 1}`);
+  (Array.isArray(manifest.texts) ? manifest.texts : []).forEach((item, index) => {
+    if (!item || !finite(item.from)) return;
+    const ref = refOf(item, 'text', index);
     const until = finite(item.until) ? item.until : (Array.isArray(item.frames) ? item.from + item.frames.length : null);
-    add(place(item.from / fps + EVENT_DELAY_SEC, 'event', item.id, `${item.id}: появление`, range));
-    if (until !== null && until > item.from) add(place(((item.from + until) / 2) / fps, 'hold', item.id, `${item.id}: удержание`, range));
-  }
-  for (const insert of Array.isArray(manifest.inserts) ? manifest.inserts : []) {
-    if (!insert || !finite(insert.from)) continue;
-    add(place(insert.from / fps + EVENT_DELAY_SEC, 'event', insert.id, `${insert.id}: вставка`, range));
-  }
+    add(place(item.from / fps + EVENT_DELAY_SEC, 'event', ref, `${ref}: появление`, range));
+    if (until !== null && until > item.from) add(place(((item.from + until) / 2) / fps, 'hold', ref, `${ref}: удержание`, range));
+  });
+  (Array.isArray(manifest.inserts) ? manifest.inserts : []).forEach((insert, index) => {
+    if (!insert || !finite(insert.from)) return;
+    const ref = refOf(insert, 'insert', index);
+    add(place(insert.from / fps + EVENT_DELAY_SEC, 'event', ref, `${ref}: вставка`, range));
+  });
   const kept = manifest.cues && Array.isArray(manifest.cues.kept) ? manifest.cues.kept : [];
-  for (const cue of kept) {
-    if (!cue || cue.notable !== true || !finite(cue.hitFrame)) continue;
-    add(place(cue.hitFrame / fps, 'event', cue.id, `${cue.id}: акцент`, range));
-  }
+  kept.forEach((cue, index) => {
+    if (!cue || cue.notable !== true || !finite(cue.hitFrame)) return;
+    const ref = refOf(cue, 'cue', index);
+    add(place(cue.hitFrame / fps, 'event', ref, `${ref}: акцент`, range));
+  });
   return out;
 }
 
@@ -69,15 +75,17 @@ function momentsFromBrief(brief, { fromSec = 0, durationSec } = {}) {
   return out;
 }
 
-// Сортировка и слияние близких моментов: при слиянии остаётся событие.
+const RANK = { event: 0, hold: 1, even: 2 };
+const rank = (m) => (m.kind in RANK ? RANK[m.kind] : 1);
+
+// Сортировка и слияние близких моментов: при слиянии остаётся событие, затем удержание, затем равномерный кадр.
 function mergeClose(moments) {
-  const rank = (m) => (m.kind === 'event' ? 0 : 1);
   const sorted = [...moments].sort((a, b) => a.timeSec - b.timeSec || rank(a) - rank(b));
   const merged = [];
   for (const moment of sorted) {
     const last = merged[merged.length - 1];
     if (last && moment.timeSec - last.timeSec < MERGE_GAP_SEC - 1e-9) {
-      if (moment.kind === 'event' && last.kind !== 'event') merged[merged.length - 1] = moment;
+      if (rank(moment) < rank(last)) merged[merged.length - 1] = moment;
       continue;
     }
     merged.push(moment);
@@ -93,13 +101,26 @@ function thin(list, max) {
   return list.filter((_, i) => picked.has(i));
 }
 
-function keyMoments({ manifest = null, brief = null, fromSec = 0, durationSec, max = MAX_MOMENTS } = {}) {
-  let moments = momentsFromManifest(manifest, { fromSec, durationSec });
-  if (!moments.length) moments = momentsFromBrief(brief, { fromSec, durationSec });
+function evenMoments(durationSec) {
+  return finite(durationSec) && durationSec > 0
+    ? sheetTimes(durationSec, EVEN_COUNT).map((timeSec, i) => ({ timeSec, kind: 'even', ref: `even-${i + 1}`, label: `кадр ${i + 1} из ${EVEN_COUNT}` }))
+    : [];
+}
+
+// Моментов мало или между ними (и от начала/до конца отрывка) дыра больше MAX_GAP_SEC: одна длинная
+// сцена (так пишет `layer brief`) иначе дала бы только два кадра на весь ролик.
+function needsEven(moments, durationSec) {
+  if (moments.length < EVEN_COUNT) return true;
+  if (!finite(durationSec)) return false;
+  const points = [0, ...moments.map((m) => m.timeSec).sort((a, b) => a - b), durationSec];
+  return points.some((t, i) => i > 0 && t - points[i - 1] > MAX_GAP_SEC);
+}
+
+function keyMoments({ manifest = null, brief = null, fromSec = 0, manifestOffsetSec = 0, durationSec, max = MAX_MOMENTS } = {}) {
+  let moments = momentsFromManifest(manifest, { fromSec: fromSec - manifestOffsetSec, durationSec });
   if (!moments.length) {
-    moments = finite(durationSec) && durationSec > 0
-      ? sheetTimes(durationSec, EVEN_COUNT).map((timeSec, i) => ({ timeSec, kind: 'even', ref: `even-${i + 1}`, label: `кадр ${i + 1} из ${EVEN_COUNT}` }))
-      : [];
+    moments = momentsFromBrief(brief, { fromSec, durationSec });
+    if (needsEven(moments, durationSec)) moments = [...moments, ...evenMoments(durationSec)];
   }
   return thin(mergeClose(moments), max);
 }
