@@ -13,6 +13,9 @@ const TARGET = 9;
 const MIN_SCENE = 7;
 const MIN_GROWTH_TENTHS = 3;
 const WORST_COUNT = 3;
+const SUBJECTS = ['preview', 'stills'];
+const SHA256 = /^[a-f0-9]{64}$/u;
+const STILLS_INDEX = /^moments-stills-[a-f0-9]{8}\.json$/u;
 const USAGE = 'Использование: automontage critic --project-dir <папка> --report <файл.json>';
 
 const tenths = (value) => Math.round(value * 10);
@@ -38,7 +41,14 @@ function validateCriticReport(report) {
   if (!isObject(report)) return { ok: false, errors: ['отчёт должен быть JSON-объектом'] };
   if (report.version !== 1) errors.push('version должен быть 1');
   if (!Number.isInteger(report.round) || report.round < 1 || report.round > MAX_ROUND) errors.push(`round должен быть целым от 1 до ${MAX_ROUND}`);
-  if (typeof report.previewSha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(report.previewSha256)) errors.push('previewSha256 должен быть sha256 (64 символа a-f0-9)');
+  if (report.previewSha256 !== undefined && (report.subject !== undefined || report.subjectSha256 !== undefined)) {
+    errors.push('previewSha256 – старая форма subject: preview; укажите либо subject и subjectSha256, либо только previewSha256');
+  } else if (report.previewSha256 !== undefined) {
+    if (typeof report.previewSha256 !== 'string' || !SHA256.test(report.previewSha256)) errors.push('previewSha256 должен быть sha256 (64 символа a-f0-9)');
+  } else {
+    if (!SUBJECTS.includes(report.subject)) errors.push('subject должен быть preview или stills');
+    if (typeof report.subjectSha256 !== 'string' || !SHA256.test(report.subjectSha256)) errors.push('subjectSha256 должен быть sha256 (64 символа a-f0-9)');
+  }
   if (!isText(report.summary)) errors.push('summary: нужен непустой текст');
   if (!Array.isArray(report.scenes) || report.scenes.length === 0) {
     errors.push('scenes: нужна минимум одна сцена');
@@ -71,6 +81,30 @@ function validateCriticReport(report) {
   return { ok: errors.length === 0, errors };
 }
 
+// Предмет отчёта: кадры preview или кадры из композиции. Старое previewSha256 – это subject: preview.
+function reportSubject(report) {
+  if (report.previewSha256 !== undefined) return { subject: 'preview', sha256: report.previewSha256 };
+  return { subject: report.subject, sha256: report.subjectSha256 };
+}
+
+// Последний индекс кадров из композиции: qa/moments-stills-<sha8>.json с source: 'stills', самый
+// свежий по времени изменения. Нечитаемые файлы пропускаются.
+function latestStillsIndex(projectDir) {
+  const dir = projectQaDir(projectDir);
+  if (!dir) return null;
+  let best = null;
+  for (const name of fs.readdirSync(dir)) {
+    if (!STILLS_INDEX.test(name)) continue;
+    const file = path.join(dir, name);
+    let index = null;
+    try { index = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { index = null; }
+    if (!isObject(index) || index.source !== 'stills' || typeof index.inputsSha256 !== 'string') continue;
+    const mtimeMs = fs.statSync(file).mtimeMs;
+    if (!best || mtimeMs > best.mtimeMs || (mtimeMs === best.mtimeMs && name > best.name)) best = { name, mtimeMs, inputsSha256: index.inputsSha256 };
+  }
+  return best;
+}
+
 // Три худшие сцены: оценка ниже 9, по возрастанию, при равенстве раньше в отчёте; без дублей ref.
 function worstScenes(report) {
   const seen = new Set();
@@ -101,7 +135,7 @@ function criticDecision(history) {
       return { action: 'stop', reason: `оценка перестала расти: было ${fmt(previous)}, стало ${fmt(overall)}`, overall, worst };
     }
   }
-  return { action: 'fix', reason: `общая оценка ${fmt(overall)}: исправьте худшие сцены и перерендерите preview`, overall, worst };
+  return { action: 'fix', reason: `общая оценка ${fmt(overall)}: исправьте худшие сцены и покажите критику новые кадры`, overall, worst };
 }
 
 function formatCriticReport(saved) {
@@ -123,7 +157,8 @@ function formatCriticReport(saved) {
 const CRITIC_FILE = /^critic-(\d+)\.json$/u;
 
 // Цепочка кругов: сохранённые critic-*.json по порядку номеров после последнего решения «остановиться».
-// Каждый круг перерендеривает preview, поэтому sha в цепочке меняется и в выборе не участвует.
+// Каждый круг меняет предмет отчёта (новые кадры из композиции или новый preview), поэтому sha в
+// цепочке меняется и в выборе не участвует.
 // next – свободный номер файла (максимальный + 1), существующие отчёты не перезаписываются.
 function savedChain(projectDir, warn) {
   const dir = projectQaDir(projectDir);
@@ -141,7 +176,7 @@ function savedChain(projectDir, warn) {
       warn(`⚠️ qa/${entry.name} не читается или повреждён: пропускаем его при подсчёте кругов`);
       continue;
     }
-    last = { name: entry.name.replace(/\.json$/u, ''), previewSha256: saved.report.previewSha256 };
+    last = { name: entry.name.replace(/\.json$/u, ''), ...reportSubject(saved.report) };
     if (saved.decision.action === 'stop') chain = [];
     else chain.push(saved.report);
   }
@@ -173,21 +208,38 @@ async function main(argv = process.argv.slice(2), { log = console.log, error = c
   }
   let manifest;
   try { manifest = readProjectManifest(projectDir); } catch (e) { error(`❌ ${e.message}`); return 2; }
-  const current = manifest.currentPreview;
-  if (!current) { error('❌ у проекта нет текущего preview: сначала соберите preview'); return 2; }
-  if (isObject(report) && report.previewSha256 !== current.sha256) {
-    error('❌ отчёт к другому preview: previewSha256 не совпадает с текущим preview проекта. Preview перерендерен, пусть критик посмотрит новые кадры.');
-    return 2;
-  }
   const check = validateCriticReport(report);
   if (!check.ok) {
     error(`❌ отчёт критика не принят:\n${check.errors.map((m) => `- ${m}`).join('\n')}`);
     return 2;
   }
+  const subject = reportSubject(report);
+  if (subject.subject === 'stills') {
+    // Кадры из композиции: отчёт годится только к последним нарисованным кадрам (их inputsSha256).
+    let latest;
+    try { latest = latestStillsIndex(projectDir); } catch (e) { error(`❌ индекс кадров не прочитан: ${e.message}`); return 2; }
+    if (!latest) {
+      error(`❌ кадров критика нет: сначала automontage layer sheet --mode moments --project-dir "${projectDir}"`);
+      return 2;
+    }
+    if (latest.inputsSha256 !== subject.sha256) {
+      error(`❌ отчёт к устаревшим кадрам: subjectSha256 не совпадает с последним индексом qa/${latest.name}. План или ТЗ менялись, пусть критик посмотрит новые кадры.`);
+      return 2;
+    }
+  } else {
+    const current = manifest.currentPreview;
+    if (!current) { error('❌ у проекта нет текущего preview: сначала соберите preview'); return 2; }
+    if (subject.sha256 !== current.sha256) {
+      error('❌ отчёт к другому preview: sha256 отчёта не совпадает с текущим preview проекта. Preview перерендерен, пусть критик посмотрит новые кадры.');
+      return 2;
+    }
+  }
   try {
     const { chain: previous, next, last } = savedChain(projectDir, error);
-    if (last && last.previewSha256 === report.previewSha256) {
-      error(`❌ отчёт к этому preview уже сохранён (${last.name}); перерендерьте preview после правок`);
+    if (last && last.subject === subject.subject && last.sha256 === subject.sha256) {
+      error(subject.subject === 'stills'
+        ? `❌ отчёт к этим кадрам уже сохранён (${last.name}); после правок снова automontage layer check и layer sheet --mode moments`
+        : `❌ отчёт к этому preview уже сохранён (${last.name}); перерендерьте preview после правок`);
       return 2;
     }
     const round = previous.length + 1;

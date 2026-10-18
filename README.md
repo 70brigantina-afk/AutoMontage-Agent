@@ -602,14 +602,21 @@ Top-level `faceSrc`/`audioSrc` не являются источником дов
 ```bash
 automontage layer new --project-dir projects/<ролик>                 # motion-слой из деталей kit
 automontage layer check --project-dir projects/<ролик> --layer motion-v01
+automontage layer sheet --mode moments --project-dir projects/<ролик> # кадры моментов из композиции, без рендера видео
+automontage critic --project-dir projects/<ролик> --report <файл.json> # отчёт агента-критика: оценки и решение
 automontage layer render --project-dir projects/<ролик> --layer motion-v01
 automontage layer import --project-dir projects/<ролик> --file projects/<ролик>/motion-v01/renders/layer-01.mp4
 automontage layer brief --project-dir projects/<ролик> --asset <reference> --title … --head-cream … --head-orange …
 automontage preview --project-dir projects/<ролик> --brief brief/vNN-draft.lesson.json
 automontage layer sheet --project-dir projects/<ролик>               # контакт-лист и кадры правок
-automontage layer sheet --mode moments --project-dir projects/<ролик> # кадры ключевых моментов, лист и телефонный лист
-automontage critic --project-dir projects/<ролик> --report <файл.json> # отчёт агента-критика: оценки и решение
 ```
+
+Цикл критика идёт до рендера preview: `layer check` → `layer sheet --mode moments` (кадры прямо из
+композиции, `qa/moments-stills-*`) → критик → правки плана → снова кадры, не больше трёх кругов;
+рендер видео внутри цикла запрещён. Отчёт критика указывает `subject: "stills"` и `subjectSha256` –
+`inputsSha256` последнего индекса кадров; отчёт к устаревшим кадрам `automontage critic` отклоняет
+кодом 2. Старая форма `previewSha256` принимается как `subject: "preview"`. Preview и слой
+рендерятся один раз после решения `stop`.
 
 `--title`, `--head-cream` и `--head-orange` – подписи для Markdown и пульта, в видео слоя их
 не видно. Звуковые эффекты слоя берутся из локальной библиотеки `AUTOMONTAGE_SFX_DIR`

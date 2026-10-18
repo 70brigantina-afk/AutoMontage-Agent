@@ -297,3 +297,95 @@ test('CLI: номер файла – максимальный существую
   assert.ok(fs.existsSync(path.join(projectDir, 'qa', 'critic-06.json')));
   assert.equal(readSaved(projectDir, 'critic-06.json').report.round, 2);
 });
+
+// Индекс кадров из композиции, как его пишет layer sheet --mode moments --source stills.
+function writeStillsIndex(projectDir, sha, mtimeSec) {
+  const dir = path.join(projectDir, 'qa');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `moments-stills-${sha.slice(0, 8)}.json`);
+  fs.writeFileSync(file, JSON.stringify({ version: 1, source: 'stills', inputsSha256: sha, moments: [] }));
+  if (mtimeSec !== undefined) fs.utimesSync(file, mtimeSec, mtimeSec);
+  return file;
+}
+
+const stillsReport = (scores, sha, extra = {}) => {
+  const r = report(scores, extra);
+  delete r.previewSha256;
+  return { ...r, subject: 'stills', subjectSha256: sha };
+};
+
+test('схема: subject и subjectSha256 вместо обязательного previewSha256, previewSha256 – синоним preview', () => {
+  const schema = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'schema', 'critic-report.schema.json'), 'utf8'));
+  assert.ok(!schema.required.includes('previewSha256'));
+  assert.deepEqual(schema.properties.subject.enum, ['preview', 'stills']);
+  assert.equal(schema.properties.subjectSha256.pattern, '^[a-f0-9]{64}$');
+  assert.equal(schema.properties.previewSha256.pattern, '^[a-f0-9]{64}$');
+  assert.ok(Array.isArray(schema.oneOf) && schema.oneOf.length === 2);
+});
+
+test('валидация: subject stills с sha проходит; без sha, чужой subject и оба поля сразу – ошибки', () => {
+  assert.deepEqual(validateCriticReport(stillsReport([9], SHA)), { ok: true, errors: [] });
+  assert.deepEqual(validateCriticReport({ ...stillsReport([9], SHA), subject: 'preview' }), { ok: true, errors: [] });
+  assert.match(validateCriticReport(stillsReport([9], 'x')).errors.join('\n'), /subjectSha256/u);
+  assert.match(validateCriticReport({ ...stillsReport([9], SHA), subject: 'video' }).errors.join('\n'), /subject/u);
+  assert.match(validateCriticReport({ ...stillsReport([9], SHA), previewSha256: SHA }).errors.join('\n'), /previewSha256/u);
+  const none = report([9]);
+  delete none.previewSha256;
+  assert.equal(validateCriticReport(none).ok, false);
+});
+
+test('CLI: отчёт к кадрам stills с sha последнего индекса принимается без preview', async (t) => {
+  const projectDir = scaffold(t);
+  const manifest = readProjectManifest(projectDir);
+  writeProjectManifest(projectDir, { ...manifest, currentPreview: null }, { expectedManifest: manifest });
+  writeStillsIndex(projectDir, OTHER_SHA);
+  const res = await runCli(projectDir, stillsReport([6, 7, 9], OTHER_SHA));
+  assert.equal(res.code, 0, res.err);
+  const saved = readSaved(projectDir, 'critic-01.json');
+  assert.equal(saved.report.subject, 'stills');
+  assert.equal(saved.report.subjectSha256, OTHER_SHA);
+  assert.equal(saved.decision.action, 'fix');
+});
+
+test('CLI: план поменяли и кадры перерисованы – отчёт к старому inputsSha256 даёт код 2', async (t) => {
+  const projectDir = scaffold(t);
+  const now = Date.now() / 1000;
+  writeStillsIndex(projectDir, OTHER_SHA, now - 100);
+  writeStillsIndex(projectDir, 'c'.repeat(64), now);
+  const res = await runCli(projectDir, stillsReport([6, 7, 9], OTHER_SHA));
+  assert.equal(res.code, 2);
+  assert.match(res.err, /устаревшим кадрам/u);
+  assert.equal(fs.existsSync(path.join(projectDir, 'qa', 'critic-01.json')), false);
+  assert.equal((await runCli(projectDir, stillsReport([6, 7, 9], 'c'.repeat(64)))).code, 0);
+});
+
+test('CLI: кадров stills нет – код 2 с подсказкой layer sheet', async (t) => {
+  const projectDir = scaffold(t);
+  const res = await runCli(projectDir, stillsReport([6, 7, 9], OTHER_SHA));
+  assert.equal(res.code, 2);
+  assert.match(res.err, /layer sheet --mode moments/u);
+});
+
+test('CLI: повторный отчёт к тем же кадрам stills отклоняется', async (t) => {
+  const projectDir = scaffold(t);
+  writeStillsIndex(projectDir, OTHER_SHA);
+  assert.equal((await runCli(projectDir, stillsReport([6, 7, 9], OTHER_SHA))).code, 0);
+  const again = await runCli(projectDir, stillsReport([8, 8, 9], OTHER_SHA, { round: 2 }));
+  assert.equal(again.code, 2);
+  assert.match(again.err, /уже сохранён \(critic-01\)/u);
+});
+
+test('CLI: subject preview с subjectSha256 сверяется с текущим preview, как старый previewSha256', async (t) => {
+  const projectDir = scaffold(t);
+  const r = report([6, 7, 9]);
+  delete r.previewSha256;
+  const bad = await runCli(projectDir, { ...r, subject: 'preview', subjectSha256: OTHER_SHA });
+  assert.equal(bad.code, 2);
+  assert.match(bad.err, /другому preview/u);
+  const ok = await runCli(projectDir, { ...r, subject: 'preview', subjectSha256: SHA });
+  assert.equal(ok.code, 0, ok.err);
+  // Старый формат к тому же preview – тот же предмет: повтор отклоняется.
+  const legacy = await runCli(projectDir, report([8, 8, 9], { round: 2 }));
+  assert.equal(legacy.code, 2);
+  assert.match(legacy.err, /уже сохранён/u);
+});

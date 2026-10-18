@@ -1109,7 +1109,8 @@ AUTOMONTAGE_TEST_MOTION_RENDER=1 node --test tests/motion-kit-render.test.js tes
    кадры, лист и телефонный лист в `qa/moments-<sha8>*` и индекс `qa/moments-<sha8>.json`; для
    ТЗ с одной длинной сценой к событиям добавляются равномерные кадры. Отчёт критика проверяет
    `automontage critic --project-dir projects/<ролик> --report <файл.json>`: код 2 для отчёта к
-   другому preview, к уже оценённому preview и для отчёта с ошибкой оценок; решение «исправлять»
+   другому preview, к устаревшим кадрам stills (не последний `qa/moments-stills-*.json`), к уже
+   оценённому предмету и для отчёта с ошибкой оценок; решение «исправлять»
    или «остановиться» и файлы `qa/critic-NN.json|txt` при успехе.
 
 Автотесты цикла критика (без Remotion):

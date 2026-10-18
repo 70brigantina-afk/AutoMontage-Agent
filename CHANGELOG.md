@@ -20,8 +20,16 @@
   оценённому preview (нужно перерендерить после правок), сохраняет
   `qa/critic-NN.json|txt` и печатает решение – исправить три худшие сцены или остановиться.
 - Агент-критик `motion-critic` (только чтение) и задание `motion-critic.md`; в motion-скиллах
-  (reel-turnkey, motion-reel, reel-from-donor, ai-promo) перед показом preview идёт цикл критика
-  до трёх кругов.
+  (reel-turnkey, motion-reel, reel-from-donor, ai-promo) цикл критика до трёх кругов.
+
+### Изменено
+
+- Критик без рендеров видео: цикл критика идёт до рендера preview по кадрам из композиции
+  (`layer check` → `layer sheet --mode moments` → критик → правки → снова кадры), рендер видео
+  внутри цикла запрещён, preview рендерится один раз после `stop`. Отчёт критика получил
+  `subject: "preview"|"stills"` и `subjectSha256`; `automontage critic` сверяет кадры stills с
+  последним индексом `qa/moments-stills-*.json` и отклоняет отчёт к устаревшим кадрам (код 2).
+  Старое поле `previewSha256` принимается как `subject: "preview"`.
 
 ## [1.17.0] - 2026-10-18
 

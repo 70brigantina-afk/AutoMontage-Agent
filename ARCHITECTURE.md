@@ -1097,11 +1097,15 @@ flowchart TD
   слоя – код 2 «критик только для моушн-роликов». Файлы – `qa/moments-stills-<sha8>*`, индекс с
   `source: 'stills'` и `inputsSha256` (план или ТЗ, props, исходник). `--source preview` – кадры
   готового preview в `qa/moments-<sha8>*`, индекс с `source: 'preview'` и `previewSha256`. `scripts/qa/critic.js` (`automontage critic`) проверяет
-  JSON-отчёт агента-критика по `schema/critic-report.schema.json`, отклоняет отчёт к другому preview
-  (код 2), сохраняет `qa/critic-NN.json|txt` и печатает решение: исправлять три худшие сцены или
+  JSON-отчёт агента-критика по `schema/critic-report.schema.json`. Предмет отчёта – `subject`
+  (`stills` или `preview`) и `subjectSha256`; старое `previewSha256` – синоним `subject: preview`.
+  Для `stills` sha сверяется с `inputsSha256` самого свежего индекса `qa/moments-stills-*.json`
+  (preview не нужен), для `preview` – с `currentPreview.sha256`; несовпадение и повторный отчёт к
+  тому же предмету – код 2. Команда сохраняет `qa/critic-NN.json|txt` и печатает решение: исправлять три худшие сцены или
   остановиться (цель 9 без сцен ниже 7, третий круг, рост меньше 0,3). Задание критику –
   `skills/reel-turnkey/references/motion-critic.md`, субагент – `.claude/agents/motion-critic.md`
-  (только чтение); цикл подключён в motion-скиллах.
+  (только чтение); цикл подключён в motion-скиллах до рендера preview: `layer check` → кадры из
+  композиции → критик → правки → снова кадры, preview рендерится один раз после `stop`.
 - **Финальный QA** (`scripts/qa/final-qa.js`). `build.js` после финиша и музыки, внутри
   тяжёлого слота и до публикации финала, запускает его отдельным node-процессом
   (`runFinalQaSync`, флаг `--from-build`): `build.js` синхронный, а раннер асинхронный. Проверки –
