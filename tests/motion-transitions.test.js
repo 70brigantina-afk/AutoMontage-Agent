@@ -285,6 +285,37 @@ test('presentationFor отдаёт презентацию и timing на frames 
   assert.throws(() => presentationFor({ type: 'zoom', frames: 10 }, size), /zoom/);
 });
 
+test('склейка push приходится ровно на кадр lead: новая сцена не видна раньше своего start', () => {
+  const { presentationFor, resolveTransition, transitionLead } = loadMotion('src/motion/transitions.js');
+  const size = { width: 1080, height: 1920 };
+  for (const fps of [25, 30, 50]) {
+    for (const frames25 of [6, 10, 15]) {
+      const transition = resolveTransition({ type: 'push', frames: frames25 }, fps);
+      const lead = transitionLead(transition);
+      const { presentation, timing } = presentationFor(transition, size);
+      // pushCut показывает входящую сцену с прогресса cutProgress (по умолчанию 5/11).
+      const cut = presentation.props.cutProgress ?? 5 / 11;
+      const at = (frame) => timing.getProgress({ frame, fps });
+      const label = `${fps} fps, frames ${frames25} (${transition.frames} кадров), lead ${lead}`;
+      assert.ok(at(lead - 1) < cut, `${label}: склейка раньше lead, прогресс ${at(lead - 1)} >= ${cut}`);
+      assert.ok(cut <= at(lead), `${label}: склейка позже lead, прогресс ${at(lead)} < ${cut}`);
+    }
+  }
+});
+
+test('проверки push «раньше предыдущей сцены» и «раньше начала ролика» срабатывают только у пересекающихся сцен', () => {
+  // Сцены по порядку: own.from >= before.to, длина перехода <= длины предыдущей >= lead, start >= 0,
+  // поэтому push не может начаться раньше предыдущей сцены или ролика.
+  const ordered = validateMotionBrief(twoScenes({ type: 'push', frames: 15 }, { first: [0, 0.6], second: [0.6, 3] }));
+  assert.ok(ordered.ok, ordered.errors.join('\n'));
+  // Пересечение (уже ошибка) – единственный путь к этим сообщениям.
+  const overlap = validateMotionBrief(twoScenes({ type: 'push', frames: 10 }, { first: [0, 3], second: [0.12, 3.5] }));
+  const text = overlap.errors.join('\n');
+  assert.match(text, /пересекается с предыдущей сценой/);
+  assert.match(text, /раньше начала предыдущей сцены/);
+  assert.match(text, /раньше начала ролика/);
+});
+
 test('MotionDirector без не-cut переходов рендерит прежние Sequence кадр-в-кадр', () => {
   const { MotionDirector } = loadMotion('src/MotionDirector.jsx');
   const base = brief();

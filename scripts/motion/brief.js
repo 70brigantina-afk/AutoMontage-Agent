@@ -124,6 +124,9 @@ function transitionErrors(scenes, index, fps) {
   const before = bounds(prev);
   if (!own || !before) return errors;
   const lead = type === 'push' ? Math.floor(length / 2) : 0;
+  // Две проверки ниже у сцен по порядку не срабатывают (own.from >= before.to, lead <= длины
+  // предыдущей сцены, start >= 0); они достижимы только у пересекающихся сцен, где уже есть ошибка
+  // «пересекается», и уточняют её для push. Оставлены как защита, если проверку порядка ослабят.
   if (own.from - lead < before.from) {
     errors.push(`${at}: push начинается за ${lead} кадров до start, раньше начала предыдущей сцены; укоротите frames или поставьте другой переход`);
   }

@@ -3,12 +3,12 @@
 // меняется), а предыдущая сцена тянется до start следующей (в том числе через паузу) и дальше на
 // хвост перехода: TransitionSeries накладывает последние кадры предыдущей сцены на первые кадры
 // следующей, поэтому видимый таймлайн и общая длительность композиции остаются прежними.
-// fade, slide и wipe начинаются в start и длятся frames кадров. push толкает кадр по центру
-// границы: lead = floor(frames/2) кадров до start, tail = frames - lead после, середина push – кадр
-// start. Всё, что сцена показывает после своей живой части (lead + номинальная длина по ТЗ), –
-// стоп-кадр её последнего живого кадра: видео не продолжается, анимации не идут, звук не звучит.
+// fade, slide и wipe начинаются в start и длятся frames кадров. push идёт по центру границы:
+// lead = floor(frames/2) кадров до start, tail = frames - lead после, склейка push – кадр start.
+// Всё, что сцена показывает после своей живой части (lead + номинальная длина по ТЗ), – стоп-кадр
+// её последнего живого кадра: видео не продолжается, анимации не идут, звук не звучит.
 // Чистые функции; рендер – в src/MotionDirector.jsx.
-import { linearTiming, springTiming } from '@remotion/transitions';
+import { linearTiming } from '@remotion/transitions';
 import { fade } from '@remotion/transitions/fade';
 import { slide } from '@remotion/transitions/slide';
 import { wipe } from '@remotion/transitions/wipe';
@@ -86,10 +86,14 @@ export const presentationFor = (transition, size = {}) => {
   if (transition.type === 'slide') return { presentation: slide({ direction: side }), timing };
   if (transition.type === 'wipe') return { presentation: wipe({ direction: side }), timing };
   if (transition.type === 'push') {
-    // pushCut толкает из центра кадра; springTiming растягивает пружину ровно на frames кадров.
+    // pushCut – жёсткая склейка с коротким наездом (punch-in) на обеих сценах и вспышкой на месте
+    // склейки. Входящая сцена видна с прогресса cutProgress. Линейный прогресс frame/frames и
+    // cutProgress между кадрами lead-1 и lead дают склейку ровно на кадре lead, то есть в start
+    // сцены по ТЗ (lead кадров перехода идут до start).
+    const lead = transitionLead(transition);
     return {
-      presentation: pushCut(),
-      timing: springTiming({ durationInFrames: transition.frames, config: { damping: 200 } }),
+      presentation: pushCut({ cutProgress: Math.max(0.5, lead - 0.5) / transition.frames }),
+      timing,
     };
   }
   throw new Error(`Unknown motion transition: ${transition.type}`);
