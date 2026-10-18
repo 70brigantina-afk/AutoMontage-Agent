@@ -1311,6 +1311,32 @@ function withPreviewMediaBundle(options, operation) {
   });
 }
 
+// Тот же lease черновика, что у withPreviewMediaBundle, но операция асинхронная: кадры критика
+// (scripts/qa/moment-stills.js) рисует renderStill в Promise, и lease обязан жить до его конца.
+async function withPreviewMediaBundleAsync(options, operation) {
+  if (typeof operation !== 'function') fail('operation must be a function');
+  const lease = prepareLessonMediaBundle(options, { briefKey: 'previewBrief', purpose: 'preview', requireStatus: 'draft' });
+  let operationError = null;
+  let operationFailed = false;
+  try {
+    lease[ASSERT_BUNDLE_CURRENT]();
+    const result = await operation(lease);
+    lease[ASSERT_BUNDLE_AFTER_CALLBACK]();
+    return result;
+  } catch (error) {
+    operationError = error;
+    operationFailed = true;
+    throw error;
+  } finally {
+    try {
+      lease.cleanup();
+    } catch (cleanupError) {
+      if (!operationFailed) throw cleanupError;
+      attachCleanupDiagnostic(operationError, cleanupError);
+    }
+  }
+}
+
 function verifyMotionBriefMedia({ root, workspace, brief, fileSystem = fs }) {
   const sourcePath = require('./project/workspace').resolveProjectPath(workspace.dir, brief.source, {
     fileSystem, mustExist: true, type: 'file',
@@ -1334,5 +1360,6 @@ module.exports = {
   verifyMotionBriefMedia,
   prepareRenderMediaBundle,
   withPreviewMediaBundle,
+  withPreviewMediaBundleAsync,
   withRenderMediaBundle,
 };

@@ -67,12 +67,13 @@ test('buildMomentSheet: кадры 720 px, лист 4 колонки, телеф
 test('run --mode moments: ТЗ без манифеста, имя moments-<sha8>, индекс с previewSha256', { skip: !hasFfmpeg }, async (t) => {
   const { projectDir, sha256 } = scaffold(t);
   const lines = [];
-  assert.equal(await run({ 'project-dir': projectDir, mode: 'moments' }, { log: (l) => lines.push(l) }), 0);
+  assert.equal(await run({ 'project-dir': projectDir, mode: 'moments', source: 'preview' }, { log: (l) => lines.push(l) }), 0);
   const name = `moments-${sha256.slice(0, 8)}`;
   const qa = path.join(projectDir, 'qa');
   for (const f of [`${name}.jpg`, `${name}-phone.jpg`, `${name}.json`, name]) assert.ok(fs.existsSync(path.join(qa, f)), f);
   const index = readIndex(projectDir, sha256);
   assert.equal(index.previewSha256, sha256);
+  assert.equal(index.source, 'preview');
   assert.deepEqual(index.moments.filter((m) => m.kind !== 'even').map((m) => m.timeSec), [0.3, 1, 2.3, 3]);
   assert.ok(index.moments.length >= 6, 'ТЗ из двух сцен дополнено равномерными кадрами');
   assert.ok(lines.some((l) => l.includes('G12')));
@@ -81,7 +82,7 @@ test('run --mode moments: ТЗ без манифеста, имя moments-<sha8>,
 
 test('run --mode moments: в отрывке сцены ТЗ сдвигаются на fromSec', { skip: !hasFfmpeg }, async (t) => {
   const { projectDir, sha256 } = scaffold(t, { fromSec: 10 });
-  assert.equal(await run({ 'project-dir': projectDir, mode: 'moments' }, { log: () => {} }), 0);
+  assert.equal(await run({ 'project-dir': projectDir, mode: 'moments', source: 'preview' }, { log: () => {} }), 0);
   assert.deepEqual(readIndex(projectDir, sha256).moments.filter((m) => m.kind !== 'even').map((m) => m.timeSec), [0.3, 1, 2.3, 3]);
 });
 
@@ -93,7 +94,7 @@ test('run --mode moments: манифест слоя из реестра в пр�
   fs.writeFileSync(path.join(projectDir, 'motion-v01', 'out', 'manifest.json'), JSON.stringify(manifestFixture({ seconds: 4, texts })));
   fs.mkdirSync(path.join(projectDir, 'qa'), { recursive: true });
   fs.writeFileSync(path.join(projectDir, 'qa', 'layer-imports.json'), JSON.stringify({ version: 1, imports: [{ layer: 'motion-v01', reference }] }));
-  assert.equal(await run({ 'project-dir': projectDir, mode: 'moments' }, { log: () => {} }), 0);
+  assert.equal(await run({ 'project-dir': projectDir, mode: 'moments', source: 'preview' }, { log: () => {} }), 0);
   const index = readIndex(projectDir, sha256);
   assert.deepEqual(index.moments.map((m) => m.ref), ['title-1', 'title-1']);
   assert.deepEqual(index.moments.map((m) => m.timeSec), [1.3, 2]);

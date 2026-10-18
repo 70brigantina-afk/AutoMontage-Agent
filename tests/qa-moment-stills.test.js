@@ -1,0 +1,277 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { toolAvailable } = require('./helpers/media-fixtures');
+const { makeLayerProject } = require('./helpers/layer-project');
+const { manifestFixture } = require('./helpers/manifest-fixtures');
+const { readProjectManifest } = require('../scripts/project/workspace');
+const { hashFile } = require('../scripts/pult/files');
+const { inputsSha256, renderMomentStills, resolveStillsTarget } = require('../scripts/qa/moment-stills');
+const sheet = require('../scripts/layer/sheet');
+
+const hasFfmpeg = toolAvailable('ffmpeg') && toolAvailable('ffprobe');
+
+// Слой без настоящего layer new: layer.json, план, точка входа и (по желанию) манифест layer check.
+function fakeLayer(projectDir, { name = 'motion-v01', manifest = true, plan = 'export const plan = { texts: [] };\n' } = {}) {
+  const project = readProjectManifest(projectDir);
+  const sourcePath = path.join(projectDir, project.source.localPath);
+  const layerDir = path.join(projectDir, name);
+  fs.mkdirSync(path.join(layerDir, 'src'), { recursive: true });
+  fs.mkdirSync(path.join(layerDir, 'public'), { recursive: true });
+  fs.writeFileSync(path.join(layerDir, 'src', 'plan.js'), plan);
+  fs.writeFileSync(path.join(layerDir, 'src', 'index.jsx'), '// entry\n');
+  fs.writeFileSync(path.join(layerDir, 'layer.json'), JSON.stringify({
+    version: 1, composition: 'Layer', fps: 25, width: 1080, height: 1920, durationInFrames: 100,
+    source: { localPath: project.source.localPath, sha256: hashFile(sourcePath) },
+  }));
+  if (manifest) {
+    fs.mkdirSync(path.join(layerDir, 'out'), { recursive: true });
+    fs.writeFileSync(path.join(layerDir, 'out', 'manifest.json'), JSON.stringify(manifestFixture({ seconds: 4 })));
+  }
+  return layerDir;
+}
+
+function layerTarget(root) {
+  const planPath = path.join(root, 'plan.js');
+  fs.writeFileSync(planPath, 'export const plan = 1;\n');
+  return {
+    kind: 'layer', projectDir: path.join(root, 'kit-fixture'), entry: path.join(root, 'index.jsx'), compositionId: 'Layer',
+    inputProps: {}, publicDir: path.join(root, 'public'), width: 1080, height: 1920, fps: 25, durationSec: 4,
+    durationInFrames: 100, planPath, sourceSha256: 'a'.repeat(64),
+  };
+}
+
+// Заглушки Remotion и очереди: записывают вызовы, renderStill кладёт байты в output.
+function stubs({ failRender = false, failBrowser = false } = {}) {
+  const calls = { bundle: 0, openBrowser: 0, closed: 0, released: 0, stills: [], labels: [] };
+  const browser = { close: async () => { calls.closed += 1; } };
+  return {
+    calls,
+    deps: {
+      bundle: async () => { calls.bundle += 1; return 'http://bundle'; },
+      openBrowser: async () => {
+        calls.openBrowser += 1;
+        if (failBrowser) throw new Error('Failed to launch the browser process');
+        return browser;
+      },
+      selectComposition: async ({ id }) => ({ id, fps: 25, width: 1080, height: 1920, durationInFrames: 100 }),
+      renderStill: async (options) => {
+        if (failRender) throw new Error('render boom');
+        calls.stills.push(options);
+        fs.writeFileSync(options.output, 'jpeg');
+      },
+      acquireSlot: ({ label }) => { calls.labels.push(label); return { release: () => { calls.released += 1; } }; },
+      tile: (frames, { outDir, name }) => ({ sheetPath: path.join(outDir, `${name}.jpg`), phonePath: path.join(outDir, `${name}-phone.jpg`), frames }),
+      edgeShare: () => 0.2,
+    },
+  };
+}
+
+const moments = [
+  { timeSec: 0.3, kind: 'event', ref: 'title-1', label: 'a' },
+  { timeSec: 1.5, kind: 'hold', ref: 'title-1', label: 'b' },
+  { timeSec: 3.9, kind: 'event', ref: 'insert-1', label: 'c' },
+];
+
+function tmp(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'moment-stills-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  return root;
+}
+
+test('renderMomentStills: 3 момента – 3 кадра, один бандл и один браузер, jpeg 85 и масштаб 720/длинная сторона', async (t) => {
+  const root = tmp(t);
+  const target = layerTarget(root);
+  const outDir = path.join(root, 'qa');
+  const { calls, deps } = stubs();
+  const result = await renderMomentStills({ target, moments, outDir, name: 'moments-stills-x', log: () => {} }, deps);
+  assert.equal(calls.bundle, 1);
+  assert.equal(calls.openBrowser, 1);
+  assert.deepEqual(calls.stills.map((s) => s.frame), [8, 38, 98]);
+  for (const still of calls.stills) {
+    assert.equal(still.scale, 720 / 1920);
+    assert.equal(still.imageFormat, 'jpeg');
+    assert.equal(still.jpegQuality, 85);
+  }
+  assert.equal(calls.closed, 1, 'браузер закрыт');
+  assert.equal(calls.released, 1, 'слот освобождён');
+  assert.deepEqual(calls.labels, ['critic stills kit-fixture']);
+  assert.equal(fs.readdirSync(result.framesDir).length, 3);
+  assert.match(fs.readdirSync(result.framesDir).sort()[0], /^01-0\.3\.jpg$/u);
+  const index = JSON.parse(fs.readFileSync(result.indexPath, 'utf8'));
+  assert.equal(index.source, 'stills');
+  assert.equal(index.inputsSha256, inputsSha256(target));
+  assert.equal(result.inputsSha256, index.inputsSha256);
+  assert.equal(index.moments.length, 3);
+  assert.deepEqual(Object.keys(index.moments[0]).sort(), ['file', 'kind', 'label', 'ref', 'timeSec']);
+  assert.equal(result.gate.id, 'G12');
+  assert.deepEqual(fs.readdirSync(outDir).filter((f) => f.includes('.frames-')), [], 'временная папка убрана');
+});
+
+test('renderMomentStills: ошибка renderStill – браузер закрыт, слот освобождён, временных кадров нет', async (t) => {
+  const root = tmp(t);
+  const outDir = path.join(root, 'qa');
+  const { calls, deps } = stubs({ failRender: true });
+  await assert.rejects(renderMomentStills({ target: layerTarget(root), moments, outDir, name: 'moments-stills-x', log: () => {} }, deps), /render boom/u);
+  assert.equal(calls.closed, 1);
+  assert.equal(calls.released, 1);
+  assert.deepEqual(fs.readdirSync(outDir), [], 'ни временной папки, ни половины кадров');
+});
+
+test('renderMomentStills: Chrome не запустился – понятная ошибка, слот освобождён, временная папка удалена', async (t) => {
+  const root = tmp(t);
+  const outDir = path.join(root, 'qa');
+  const { calls, deps } = stubs({ failBrowser: true });
+  await assert.rejects(renderMomentStills({ target: layerTarget(root), moments, outDir, name: 'moments-stills-x', log: () => {} }, deps),
+    (error) => /Chrome/u.test(error.message) && /Failed to launch/u.test(error.message));
+  assert.equal(calls.released, 1);
+  assert.deepEqual(fs.readdirSync(outDir), []);
+});
+
+test('renderMomentStills: медиа motion-reel берутся из lease, а не из props ТЗ', async (t) => {
+  const root = tmp(t);
+  const outDir = path.join(root, 'qa');
+  const { calls, deps } = stubs();
+  let leased = 0;
+  const target = {
+    ...layerTarget(root), kind: 'motion-reel', inputProps: { audioSrc: 'voice.wav' }, publicDir: null,
+    withMedia: async (operation) => { leased += 1; return operation({ inputProps: { audioSrc: 'leased.wav' }, publicDir: path.join(root, 'lease') }); },
+  };
+  let bundledPublic = null;
+  deps.bundle = async (options) => { bundledPublic = options.publicDir; return 'http://bundle'; };
+  await renderMomentStills({ target, moments: moments.slice(0, 1), outDir, name: 'moments-stills-y', log: () => {} }, deps);
+  assert.equal(leased, 1);
+  assert.equal(bundledPublic, path.join(root, 'lease'));
+  assert.equal(calls.stills[0].inputProps.audioSrc, 'leased.wav');
+});
+
+test('inputsSha256: правка plan.js меняет хеш входов, тот же план – тот же хеш', (t) => {
+  const target = layerTarget(tmp(t));
+  const before = inputsSha256(target);
+  assert.match(before, /^[a-f0-9]{64}$/u);
+  assert.equal(inputsSha256(target), before);
+  fs.writeFileSync(target.planPath, 'export const plan = 2;\n');
+  assert.notEqual(inputsSha256(target), before);
+  assert.notEqual(inputsSha256({ ...target, inputProps: { x: 1 } }), inputsSha256(target));
+  assert.notEqual(inputsSha256({ ...target, sourceSha256: 'b'.repeat(64) }), inputsSha256(target));
+});
+
+test('resolveStillsTarget: слой без out/manifest.json – «сначала automontage layer check»', { skip: !hasFfmpeg }, (t) => {
+  const { projectDir } = makeLayerProject(t, { seconds: 2 });
+  fakeLayer(projectDir, { manifest: false });
+  assert.throws(() => resolveStillsTarget(projectDir, readProjectManifest(projectDir)),
+    (error) => error.message.includes('сначала `automontage layer check`') && error.code === 'CRITIC_STILLS_REFUSED');
+});
+
+test('resolveStillsTarget: урок без слоя – «критик только для моушн-роликов»', { skip: !hasFfmpeg }, (t) => {
+  const { projectDir } = makeLayerProject(t, { seconds: 2 });
+  assert.throws(() => resolveStillsTarget(projectDir, readProjectManifest(projectDir)),
+    (error) => error.message.includes('критик только для моушн-роликов') && error.code === 'CRITIC_STILLS_REFUSED');
+});
+
+test('resolveStillsTarget: последний слой – entry, композиция, public, геометрия и манифест', { skip: !hasFfmpeg }, (t) => {
+  const { projectDir } = makeLayerProject(t, { seconds: 2 });
+  fakeLayer(projectDir, { name: 'motion-v01', manifest: false });
+  const layerDir = fakeLayer(projectDir, { name: 'motion-v02' });
+  const target = resolveStillsTarget(projectDir, readProjectManifest(projectDir));
+  assert.equal(target.kind, 'layer');
+  assert.equal(target.layerName, 'motion-v02');
+  assert.equal(target.entry, path.join(layerDir, 'src', 'index.jsx'));
+  assert.equal(target.compositionId, 'Layer');
+  assert.equal(target.publicDir, path.join(layerDir, 'public'));
+  assert.equal(target.planPath, path.join(layerDir, 'src', 'plan.js'));
+  assert.deepEqual(target.inputProps, {});
+  assert.deepEqual([target.width, target.height, target.fps, target.durationSec], [1080, 1920, 25, 4]);
+  assert.equal(target.manifest.fps, 25);
+  assert.equal(resolveStillsTarget(projectDir, readProjectManifest(projectDir), { layer: 'motion-v02' }).layerName, 'motion-v02');
+});
+
+test('resolveStillsTarget: motion-reel – MotionReel с props черновика ТЗ', (t) => {
+  const { fixture } = require('./helpers/motion-workflow-fixture.cjs');
+  const { workspace } = fixture(t);
+  const target = resolveStillsTarget(workspace.dir, readProjectManifest(workspace.dir));
+  assert.equal(target.kind, 'motion-reel');
+  assert.equal(target.compositionId, 'MotionReel');
+  assert.equal(path.basename(target.entry), 'index.js');
+  assert.deepEqual([target.width, target.height, target.fps, target.durationSec], [320, 568, 30, 2]);
+  assert.equal(target.inputProps.draftPreview, true);
+  assert.equal(typeof target.withMedia, 'function');
+  assert.match(target.sourceSha256, /^[a-f0-9]{64}$/u);
+});
+
+test('layer sheet --mode moments: по умолчанию stills; у урока код 2 и «критик только для моушн-роликов»', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir } = makeLayerProject(t, { seconds: 2 });
+  const errors = [];
+  const code = await sheet.run({ 'project-dir': projectDir, mode: 'moments' }, { log: () => {}, warn: (l) => errors.push(l) });
+  assert.equal(code, 2);
+  assert.match(errors.join('\n'), /критик только для моушн-роликов/u);
+});
+
+test('layer sheet --source stills: слой без layer check – код 2 и подсказка', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir } = makeLayerProject(t, { seconds: 2 });
+  fakeLayer(projectDir, { manifest: false });
+  const errors = [];
+  const code = await sheet.run({ 'project-dir': projectDir, mode: 'moments', source: 'stills' }, { log: () => {}, warn: (l) => errors.push(l) });
+  assert.equal(code, 2);
+  assert.match(errors.join('\n'), /сначала `automontage layer check`/u);
+});
+
+test('layer sheet --source stills: моменты из манифеста слоя, кадры через renderMomentStills', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir } = makeLayerProject(t, { seconds: 2 });
+  fakeLayer(projectDir);
+  const seen = [];
+  const lines = [];
+  const code = await sheet.run({ 'project-dir': projectDir, mode: 'moments', source: 'stills' }, {
+    log: (l) => lines.push(l), warn: () => {},
+    renderStillsImpl: async (input) => {
+      seen.push(input);
+      return { framesDir: 'f', sheetPath: 's.jpg', phonePath: 'p.jpg', indexPath: 'i.json', inputsSha256: 'c'.repeat(64), gate: require('../scripts/qa/empty-frame-gate').emptyFrameGate([]) };
+    },
+  });
+  assert.equal(code, 0);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].target.kind, 'layer');
+  assert.ok(seen[0].moments.length > 0);
+  assert.match(seen[0].name, /^moments-stills-[a-f0-9]{8}$/u);
+  assert.ok(lines.some((l) => l.includes('i.json')));
+});
+
+test('layer sheet: неизвестный --source и --source вне moments – код 2', async () => {
+  const errors = [];
+  assert.equal(await sheet.run({ 'project-dir': '/nonexistent', mode: 'moments', source: 'x' }, { log: () => {}, warn: (l) => errors.push(l) }), 2);
+  assert.match(errors.join('\n'), /stills.*preview/u);
+  assert.equal(await sheet.run({ 'project-dir': '/nonexistent', mode: 'even', source: 'stills' }, { log: () => {}, warn: (l) => errors.push(l) }), 2);
+});
+
+// Настоящий Remotion (опт-ин): шаблон слоя 1080×1920 после layer check, 2 кадра шириной 405 px.
+test('real Remotion: кадры моментов шаблона слоя 405×720', {
+  skip: process.env.AUTOMONTAGE_TEST_MOTION_RENDER !== '1', timeout: 300_000,
+}, async (t) => {
+  const { execFileSync } = require('node:child_process');
+  const newLayer = require('../scripts/layer/new');
+  const check = require('../scripts/layer/check');
+  const { projectDir, sfxDir } = makeLayerProject(t, { seconds: 4, size: '1080x1920' });
+  const previousSfxDir = process.env.AUTOMONTAGE_SFX_DIR;
+  process.env.AUTOMONTAGE_SFX_DIR = sfxDir;
+  t.after(() => {
+    if (previousSfxDir === undefined) delete process.env.AUTOMONTAGE_SFX_DIR;
+    else process.env.AUTOMONTAGE_SFX_DIR = previousSfxDir;
+  });
+  assert.equal(await newLayer.run({ 'project-dir': projectDir }, { log: () => {}, warn: () => {} }), 0);
+  await check.run({ 'project-dir': projectDir, layer: 'motion-v01' }, { log: () => {} });
+  const target = resolveStillsTarget(projectDir, readProjectManifest(projectDir));
+  const outDir = path.join(projectDir, 'qa');
+  const result = await renderMomentStills({
+    target, outDir, name: 'moments-stills-real', log: () => {},
+    moments: [{ timeSec: 0.5, kind: 'even', ref: 'a', label: 'a' }, { timeSec: 2, kind: 'even', ref: 'b', label: 'b' }],
+  });
+  const frames = fs.readdirSync(result.framesDir).sort();
+  assert.equal(frames.length, 2);
+  for (const frame of frames) {
+    const size = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0',
+      path.join(result.framesDir, frame)], { encoding: 'utf8' }).trim();
+    assert.equal(size, '405,720');
+  }
+});

@@ -664,6 +664,12 @@ automontage layer stock --project-dir projects/<ролик> --layer motion-v01 \
   `qa/moments-<…>.json`. Эти кадры смотрит агент-критик, отчёт принимает `automontage critic
   --project-dir <проект> --report <файл.json>` (оценки по пяти осям, решение «исправлять» или
   «остановиться», файлы `qa/critic-NN.json|txt`).
+- В режиме moments по умолчанию `--source stills`: кадры рисуются прямо из композиции
+  (`renderStill`, без рендера видео и без preview) – для слоя (последний `motion-vNN` или
+  `--layer`; нужен `layer check`, иначе код 2 «сначала `automontage layer check`») и для
+  motion-reel. Файлы – `qa/moments-stills-<8 знаков sha256 входов>.*`, индекс с `source: 'stills'`
+  и `inputsSha256` (план или ТЗ, props, исходник). Урок без слоя – код 2 «критик только для
+  моушн-роликов». `--source preview` – прежние кадры готового preview (`source: 'preview'`).
 
 ## Ограничения
 

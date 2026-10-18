@@ -15,8 +15,11 @@ const { EDGE_THRESHOLD, EDGE_WIDTH, emptyFrameGate } = require('../qa/empty-fram
 const { safeRect } = require('../qa/safe-rect');
 const { LAYER_NAME, projectFrom, readJson, relative, writeJson } = require('./common');
 
-const FLAGS = { 'project-dir': 'value', mode: 'value' };
+const FLAGS = { 'project-dir': 'value', mode: 'value', source: 'value', layer: 'value' };
 const MODES = ['even', 'moments'];
+// Источник кадров листа моментов: stills – прямо из композиции (по умолчанию, без рендера видео),
+// preview – из готового preview (прежнее поведение).
+const SOURCES = ['stills', 'preview'];
 
 // Кадр для критика: длинная сторона 720 px; телефонная копия листа – кадр шириной 360 px.
 const CRITIC_LONG_SIDE = 720;
@@ -167,54 +170,71 @@ function buildSheet({ videoPath, width, height, duration, fps, outDir, name, com
   }
 }
 
-// Лист ключевых моментов: по одному ffmpeg на момент даёт три копии кадра – для критика (720 px по
-// длинной стороне, без рамки), для листа (миниатюра с рамкой safe-зоны) и для телефонного листа
-// (ширина 360 px). Секунды зажаты в [0, lastFrameSec], как в buildSheet. projectDir нужен только для
-// относительных путей индекса; previewSha256 привязывает индекс к конкретному preview.
-function buildMomentSheet({ videoPath, width, height, duration, fps, moments, outDir, name, projectDir = path.dirname(outDir), previewSha256 = null, log = console.warn }) {
+// Плитка листа моментов из готовых кадров критика – общая для обоих источников (кадры из preview
+// и кадры из композиции, scripts/qa/moment-stills.js). frames – [{file}] по порядку, кадры одной
+// величины с пропорциями width×height (любого масштаба). На каждый кадр один ffmpeg даёт миниатюру с
+// рамкой safe-зоны и телефонную копию шириной 360 px; затем листы по SHEET_COLUMNS колонок.
+function tileMomentFrames(frames, { outDir, name, width, height }) {
   const { thumbW, box } = thumbBox(width, height);
+  const work = path.join(outDir, `${name}.tiles-${process.pid}-${crypto.randomBytes(4).toString('hex')}`);
+  fs.mkdirSync(path.join(work, 'sheet'), { recursive: true });
+  fs.mkdirSync(path.join(work, 'phone'), { recursive: true });
+  try {
+    const drawbox = `drawbox=x=${box.x}:y=${box.y}:w=${box.w}:h=${box.h}:color=magenta@0.9:t=2`;
+    frames.forEach(({ file }, i) => {
+      const n = String(i + 1).padStart(2, '0');
+      const sheetFrame = path.join(work, 'sheet', `f${n}.png`);
+      const phoneFrame = path.join(work, 'phone', `f${n}.png`);
+      const graph = `[0:v]split=2[a][b];[a]scale=${thumbW}:-2,${drawbox}[o1];[b]scale=${PHONE_WIDTH}:-2[o2]`;
+      runTool('ffmpeg', [...QUIET, '-i', file, '-filter_complex', graph,
+        '-map', '[o1]', '-frames:v', '1', sheetFrame, '-map', '[o2]', '-frames:v', '1', phoneFrame], { stage: 'moment tile frame' });
+      if (![sheetFrame, phoneFrame].every((f) => fs.statSync(f, { throwIfNoEntry: false })?.size)) {
+        throw new Error(`moment tile frame: не удалось уменьшить кадр ${path.basename(file)}`);
+      }
+    });
+    const rows = Math.max(1, Math.ceil(frames.length / SHEET_COLUMNS));
+    const sheetPath = path.join(outDir, `${name}.jpg`);
+    const phonePath = path.join(outDir, `${name}-phone.jpg`);
+    runTool('ffmpeg', [...QUIET, '-i', path.join(work, 'sheet', 'f%02d.png'), '-vf', `tile=${SHEET_COLUMNS}x${rows}`, '-frames:v', '1', sheetPath], { stage: 'moment sheet tile' });
+    runTool('ffmpeg', [...QUIET, '-i', path.join(work, 'phone', 'f%02d.png'), '-vf', `tile=${SHEET_COLUMNS}x${rows}`, '-frames:v', '1', phonePath], { stage: 'moment phone tile' });
+    return { sheetPath, phonePath };
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+}
+
+// Лист ключевых моментов из готового preview: по одному ffmpeg на момент – кадр для критика (720 px
+// по длинной стороне, без рамки), затем общая плитка tileMomentFrames. Секунды зажаты в
+// [0, lastFrameSec], как в buildSheet. projectDir нужен только для относительных путей индекса;
+// previewSha256 привязывает индекс к конкретному preview.
+function buildMomentSheet({ videoPath, width, height, duration, fps, moments, outDir, name, projectDir = path.dirname(outDir), previewSha256 = null, log = console.warn }) {
   const lastFrameSec = Math.max(0, duration - 1 / fps);
   const clampSeek = (t) => Math.min(Math.max(0, t), lastFrameSec);
   const framesDir = path.join(outDir, name);
   fs.rmSync(framesDir, { recursive: true, force: true });
   fs.mkdirSync(framesDir, { recursive: true });
-  const work = path.join(outDir, `${name}.frames-${process.pid}-${crypto.randomBytes(4).toString('hex')}`);
-  fs.mkdirSync(path.join(work, 'sheet'), { recursive: true });
-  fs.mkdirSync(path.join(work, 'phone'), { recursive: true });
-  try {
-    const criticScale = height > width ? `scale=-2:${CRITIC_LONG_SIDE}` : `scale=${CRITIC_LONG_SIDE}:-2`;
-    const drawbox = `drawbox=x=${box.x}:y=${box.y}:w=${box.w}:h=${box.h}:color=magenta@0.9:t=2`;
-    const entries = [];
-    moments.forEach((moment, i) => {
-      const n = String(i + 1).padStart(2, '0');
-      const file = path.join(framesDir, `${n}-${Number(moment.timeSec.toFixed(3))}.jpg`);
-      const sheetFrame = path.join(work, 'sheet', `f${n}.png`);
-      const phoneFrame = path.join(work, 'phone', `f${n}.png`);
-      const graph = `[0:v]split=3[a][b][c];[a]${criticScale}[o1];[b]scale=${thumbW}:-2,${drawbox}[o2];[c]scale=${PHONE_WIDTH}:-2[o3]`;
-      runTool('ffmpeg', [...QUIET, '-ss', formatSeconds(clampSeek(moment.timeSec)), '-i', videoPath, '-filter_complex', graph,
-        '-map', '[o1]', '-frames:v', '1', file, '-map', '[o2]', '-frames:v', '1', sheetFrame, '-map', '[o3]', '-frames:v', '1', phoneFrame], { stage: 'moment frame' });
-      if (![file, sheetFrame, phoneFrame].every((f) => fs.statSync(f, { throwIfNoEntry: false })?.size)) {
-        throw new Error(`moment frame: не удалось получить кадр на ${moment.timeSec.toFixed(2)} с – файл повреждён или кодек не читается`);
-      }
-      entries.push({ file: relative(projectDir, file), timeSec: moment.timeSec, kind: moment.kind, ref: moment.ref, label: moment.label });
-    });
-    const rows = Math.max(1, Math.ceil(moments.length / SHEET_COLUMNS));
-    const sheetPath = path.join(outDir, `${name}.jpg`);
-    const phonePath = path.join(outDir, `${name}-phone.jpg`);
-    runTool('ffmpeg', [...QUIET, '-i', path.join(work, 'sheet', 'f%02d.png'), '-vf', `tile=${SHEET_COLUMNS}x${rows}`, '-frames:v', '1', sheetPath], { stage: 'moment sheet tile' });
-    runTool('ffmpeg', [...QUIET, '-i', path.join(work, 'phone', 'f%02d.png'), '-vf', `tile=${SHEET_COLUMNS}x${rows}`, '-frames:v', '1', phonePath], { stage: 'moment phone tile' });
-    const indexPath = path.join(outDir, `${name}.json`);
-    writeJson(indexPath, { version: 1, previewSha256, moments: entries });
-    const samples = moments.map((moment) => {
-      const t = clampSeek(moment.timeSec);
-      const edgeShare = frameEdgeShare(videoPath, t);
-      return edgeShare === null ? null : { timeSec: t, edgeShare };
-    });
-    log(`кадров для критика: ${entries.length}`);
-    return { sheetPath, phonePath, framesDir, indexPath, gate: emptyFrameGate(samples) };
-  } finally {
-    fs.rmSync(work, { recursive: true, force: true });
-  }
+  const criticScale = height > width ? `scale=-2:${CRITIC_LONG_SIDE}` : `scale=${CRITIC_LONG_SIDE}:-2`;
+  const entries = [];
+  const frames = moments.map((moment, i) => {
+    const n = String(i + 1).padStart(2, '0');
+    const file = path.join(framesDir, `${n}-${Number(moment.timeSec.toFixed(3))}.jpg`);
+    runTool('ffmpeg', [...QUIET, '-ss', formatSeconds(clampSeek(moment.timeSec)), '-i', videoPath, '-vf', criticScale, '-frames:v', '1', file], { stage: 'moment frame' });
+    if (!fs.statSync(file, { throwIfNoEntry: false })?.size) {
+      throw new Error(`moment frame: не удалось получить кадр на ${moment.timeSec.toFixed(2)} с – файл повреждён или кодек не читается`);
+    }
+    entries.push({ file: relative(projectDir, file), timeSec: moment.timeSec, kind: moment.kind, ref: moment.ref, label: moment.label });
+    return { file };
+  });
+  const { sheetPath, phonePath } = tileMomentFrames(frames, { outDir, name, width, height });
+  const indexPath = path.join(outDir, `${name}.json`);
+  writeJson(indexPath, { version: 1, source: 'preview', previewSha256, moments: entries });
+  const samples = moments.map((moment) => {
+    const t = clampSeek(moment.timeSec);
+    const edgeShare = frameEdgeShare(videoPath, t);
+    return edgeShare === null ? null : { timeSec: t, edgeShare };
+  });
+  log(`кадров для критика: ${entries.length}`);
+  return { sheetPath, phonePath, framesDir, indexPath, gate: emptyFrameGate(samples) };
 }
 
 // Манифест слоя motion-kit, на котором собран preview: сцена ТЗ ссылается на ассет слоя (brollMedia.src),
@@ -269,14 +289,57 @@ async function runMoments({ projectDir, current, videoPath, probe, log, warn }) 
   return 0;
 }
 
+// Кадры критика из композиции (scripts/qa/moment-stills.js): цель – слой или motion-reel, моменты –
+// из манифеста слоя или сцен ТЗ, имя – по sha256 входов кадров. Отказ цели (урок, слой без layer
+// check) – код 2 с подсказкой.
+async function runStills({ projectDir, manifest, options, deps, log, warn }) {
+  const { REFUSED, inputsSha256, renderMomentStills, resolveStillsTarget } = require('../qa/moment-stills');
+  const { keyMoments } = require('../qa/key-moments');
+  let target;
+  try {
+    target = resolveStillsTarget(projectDir, manifest, { layer: options.layer ?? null });
+  } catch (error) {
+    if (error?.code !== REFUSED) throw error;
+    warn(`❌ ${error.message}`);
+    return 2;
+  }
+  const moments = target.kind === 'layer'
+    ? keyMoments({ manifest: target.manifest, durationSec: target.durationSec })
+    : keyMoments({ brief: target.brief, durationSec: target.durationSec });
+  const result = await (deps.renderStillsImpl || renderMomentStills)({
+    target, moments, outDir: projectQaDir(projectDir, { create: true }), name: `moments-stills-${inputsSha256(target).slice(0, 8)}`, log: warn,
+  });
+  log(`Лист моментов: ${result.sheetPath}`);
+  log(`Лист для телефона: ${result.phonePath}`);
+  log(`Кадры для критика: ${result.framesDir}`);
+  log(`Индекс моментов: ${result.indexPath}`);
+  log(formatReport(buildReport({ kind: 'sheet', profile: null, gates: [result.gate], inputs: [] })));
+  return 0;
+}
+
 async function run(options, deps = {}) {
   const log = deps.log || console.log;
+  const warn = deps.warn || console.error;
   const mode = options.mode === undefined ? 'even' : options.mode;
   if (!MODES.includes(mode)) {
-    (deps.warn || console.error)(`❌ неизвестный --mode «${mode}»: допустимо even (равномерный контакт-лист, по умолчанию) или moments (ключевые моменты)`);
+    warn(`❌ неизвестный --mode «${mode}»: допустимо even (равномерный контакт-лист, по умолчанию) или moments (ключевые моменты)`);
+    return 2;
+  }
+  if (mode !== 'moments' && (options.source !== undefined || options.layer !== undefined)) {
+    warn('❌ --source и --layer – только для --mode moments');
+    return 2;
+  }
+  const source = options.source === undefined ? 'stills' : options.source;
+  if (mode === 'moments' && !SOURCES.includes(source)) {
+    warn(`❌ неизвестный --source «${source}»: допустимо stills (кадры из композиции, по умолчанию) или preview (кадры готового preview)`);
+    return 2;
+  }
+  if (mode === 'moments' && source === 'preview' && options.layer !== undefined) {
+    warn('❌ --layer – только для --source stills');
     return 2;
   }
   const { projectDir, manifest } = projectFrom(options);
+  if (mode === 'moments' && source === 'stills') return runStills({ projectDir, manifest, options, deps, log, warn: deps.warn || console.warn });
   const current = manifest.currentPreview;
   if (!current) throw new Error('в проекте нет текущего preview – сначала соберите preview');
   const videoPath = resolveProjectPath(projectDir, current.filePath, { label: 'currentPreview.filePath', mustExist: true, type: 'file' });
@@ -308,4 +371,4 @@ async function run(options, deps = {}) {
   return 0;
 }
 
-module.exports = { FLAGS, buildMomentSheet, buildSheet, frameEdgeShare, frameStats, run, sheetTimes, thumbBox };
+module.exports = { FLAGS, buildMomentSheet, buildSheet, frameEdgeShare, frameStats, run, sheetTimes, thumbBox, tileMomentFrames };
