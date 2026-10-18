@@ -28,8 +28,9 @@ function sceneScore(scene) {
 
 // Общая оценка круга – среднее оценок сцен, до 0,1.
 function overallScore(report) {
-  const scores = report.scenes.map(sceneScore);
-  return tenths(scores.reduce((acc, s) => acc + s, 0) / scores.length) / 10;
+  // Складываем целые десятые, а не уже округлённые дроби: (8,4 + 8,5) / 2 даёт 8,5, а не 8,4.
+  const sum = report.scenes.reduce((acc, scene) => acc + tenths(sceneScore(scene)), 0);
+  return Math.round(sum / report.scenes.length) / 10;
 }
 
 function validateCriticReport(report) {
@@ -121,18 +122,27 @@ function formatCriticReport(saved) {
 
 const CRITIC_FILE = /^critic-(\d+)\.json$/u;
 
-// Уже сохранённые отчёты того же preview, по порядку номеров.
-function savedHistory(projectDir, previewSha256) {
+// Цепочка кругов: сохранённые critic-*.json по порядку номеров после последнего решения «остановиться».
+// Каждый круг перерендеривает preview, поэтому sha в цепочке меняется и в выборе не участвует.
+// next – свободный номер файла (максимальный + 1), существующие отчёты не перезаписываются.
+function savedChain(projectDir, warn) {
   const dir = projectQaDir(projectDir);
-  if (!dir) return [];
-  return fs.readdirSync(dir)
+  if (!dir) return { chain: [], next: 1 };
+  const entries = fs.readdirSync(dir)
     .map((name) => ({ name, match: CRITIC_FILE.exec(name) }))
     .filter((e) => e.match)
-    .sort((a, b) => Number(a.match[1]) - Number(b.match[1]))
-    .map((e) => {
-      try { return JSON.parse(fs.readFileSync(path.join(dir, e.name), 'utf8')).report; } catch { return null; }
-    })
-    .filter((r) => r && r.previewSha256 === previewSha256);
+    .sort((a, b) => Number(a.match[1]) - Number(b.match[1]));
+  let chain = [];
+  for (const entry of entries) {
+    let saved = null;
+    try { saved = JSON.parse(fs.readFileSync(path.join(dir, entry.name), 'utf8')); } catch { saved = null; }
+    if (!isObject(saved) || !isObject(saved.report) || !Array.isArray(saved.report.scenes) || !isObject(saved.decision)) {
+      warn(`⚠️ qa/${entry.name} не читается или повреждён: пропускаем его при подсчёте кругов`);
+    } else if (saved.decision.action === 'stop') chain = [];
+    else chain.push(saved.report);
+  }
+  const next = entries.length ? Number(entries[entries.length - 1].match[1]) + 1 : 1;
+  return { chain, next };
 }
 
 function parseArgs(argv) {
@@ -171,13 +181,13 @@ async function main(argv = process.argv.slice(2), { log = console.log, error = c
     return 2;
   }
   try {
-    const previous = savedHistory(projectDir, current.sha256);
+    const { chain: previous, next } = savedChain(projectDir, error);
     const round = previous.length + 1;
-    if (report.round !== round) error(`⚠️ в отчёте указан круг ${report.round}, а по сохранённым отчётам этот preview в круге ${round}: используем ${round}`);
+    if (report.round !== round) error(`⚠️ в отчёте указан круг ${report.round}, а по сохранённым отчётам это круг ${round}: используем ${round}`);
     // Сохраняем вычисленный номер круга (он может быть и выше третьего: решение тогда «остановиться»).
     const saved = { ...report, round };
     const decision = criticDecision([...previous, saved]);
-    const name = `critic-${String(round).padStart(2, '0')}`;
+    const name = `critic-${String(next).padStart(2, '0')}`;
     const paths = writeReport(projectDir, name, { report: saved, decision }, undefined, formatCriticReport);
     log(fs.readFileSync(paths.textPath, 'utf8').trimEnd());
     log(`отчёт: qa/${name}.txt`);

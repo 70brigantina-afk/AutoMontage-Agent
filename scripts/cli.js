@@ -65,6 +65,8 @@ function help() {
   automontage clean [--level renders|archive] [--yes]
                                       отчёт, что можно удалить у готовых роликов; --yes удаляет
   automontage critic --project-dir <папка> --report <файл.json>
+                                      проверить отчёт критика, сохранить qa/critic-NN.json|txt
+                                      и показать решение: исправлять три худшие сцены или остановиться
   automontage qa-final <папка> [--final <mp4>] [--model <имя>] [--music]
                                       повторно расшифровать финал: паразиты, дубли, пропавшие слова,
                                       паузы, вздохи – отчёт qa/final-*.txt (сборка делает это сама)

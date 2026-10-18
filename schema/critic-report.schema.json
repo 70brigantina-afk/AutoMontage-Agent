@@ -2,6 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://automontage.local/schema/critic-report.schema.json",
   "title": "AutoMontage Critic Report",
+  "description": "Входной отчёт критика. Сохранённый qa/critic-NN.json - обёртка {report, decision}: round в ней пересчитывает команда automontage critic по цепочке кругов, поэтому в сохранённом отчёте он может отличаться от входного.",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "round", "previewSha256", "scenes", "summary"],
