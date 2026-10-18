@@ -19,8 +19,8 @@ export const CAMERA_DEFAULTS = Object.freeze({
   // Мягкий край резкой копии над заливкой (fill): px кадра для короткой стороны 1080. Сторона
   // растушёвана на столько, сколько она открывает за план, в пределах [minFeatherPx, featherPx].
   fill: { featherPx: 96, minFeatherPx: 8 },
-  // Наезд на элемент кадра (pushes): длина в кадрах эталона 25 fps и масштаб по умолчанию (не больше
-  // maxScale дорожки: при maxScale ниже k наезд без явного k идёт до maxScale).
+  // Наезд на элемент кадра (pushes): длина в кадрах эталона 25 fps и верхняя граница масштаба по
+  // умолчанию. Без явного k наезд идёт до min(k, maxScale): при стандартном maxScale 1,25 – до 1,25.
   push: { frames: 12, k: 1.35 },
 });
 
@@ -66,9 +66,10 @@ export function compileCamera(spec, { fps, width, height, durationInFrames }) {
 }
 
 // Наезды камеры на элемент кадра: [{at, target, frames?, k?}]. at – секунды, frames – кадры эталона
-// 25 fps (по умолчанию CAMERA_DEFAULTS.push.frames), k – масштаб (не больше maxScale). Бокс target
-// ставит compileLayer (элементы камере не известны): здесь box = null, и такой наезд cameraAt
-// пропускает. Наезд держится до ближайшего следующего плана, панча или наезда (until).
+// 25 fps (по умолчанию CAMERA_DEFAULTS.push.frames), k – масштаб (по умолчанию min(1,35, maxScale),
+// явный k больше maxScale – ошибка). Бокс target ставит compileLayer (элементы камере не известны):
+// здесь box = null, и такой наезд cameraAt пропускает. Наезд держится до ближайшего следующего
+// плана или панча (hold); следующий наезд стартует из этого удержания.
 function compilePushes(pushes, { fps, durationInFrames, maxScale, shots, punches }) {
   if (pushes === undefined || pushes === null) return [];
   if (!Array.isArray(pushes)) throw new Error('camera.pushes должен быть массивом {at, target, frames?, k?}');
@@ -87,9 +88,24 @@ function compilePushes(pushes, { fps, durationInFrames, maxScale, shots, punches
     if (k > maxScale + 1e-9) throw new Error(`${name}: k ${k} больше camera.maxScale ${maxScale} – уменьшите k или поднимите maxScale`);
     return { index, target: push.target, from, frames: ref25(rawFrames, fps), k, box: null };
   }).sort((a, b) => a.from - b.from);
-  const starts = [...shots.map((s) => s.from), ...punches.map((p) => p.from), ...list.map((p) => p.from)];
+  const next = (starts, push) => starts.filter((at) => at > push.from).reduce((min, at) => Math.min(min, at), durationInFrames);
+  const planStarts = [...shots.map((s) => s.from), ...punches.map((p) => p.from)];
   for (const push of list) {
-    push.until = starts.filter((at) => at > push.from).reduce((min, at) => Math.min(min, at), durationInFrames);
+    // Ничто не начинается, пока наезд идёт: план, панч или другой наезд внутри [from, from + frames)
+    // ломает движение (мгновенный выход из наезда посреди него). Ровно в from + frames – можно.
+    const end = push.from + push.frames;
+    const name = `camera.pushes[${push.index}] (${push.target})`;
+    const at = (frame) => `${(frame / fps).toFixed(2)} с`;
+    const shot = shots.find((s) => s.from > push.from && s.from < end);
+    if (shot) throw new Error(`${name}: план «${shot.preset}» в ${at(shot.from)} начинается раньше конца наезда (${at(end)}) – сдвиньте план или наезд`);
+    const punch = punches.find((p) => p.from >= push.from && p.from < end);
+    if (punch) throw new Error(`${name}: панч в ${at(punch.from)} начинается раньше конца наезда (${at(end)}) – сдвиньте панч или наезд`);
+    const other = list.find((p) => p !== push && p.from >= push.from && p.from < end && (p.from > push.from || p.index > push.index));
+    if (other) throw new Error(`${name}: наезд на «${other.target}» в ${at(other.from)} начинается раньше конца наезда (${at(end)}) – сдвиньте один из наездов`);
+    // hold – до следующего плана или панча: после конца наезда камера держит k и центр. Следующий
+    // наезд начинается из этого удержания. until – конец участия наезда в кадре (для манифеста).
+    push.hold = next(planStarts, push);
+    push.until = next([...planStarts, ...list.map((p) => p.from)], push);
   }
   return list;
 }
@@ -102,8 +118,9 @@ function clampCenter(c, size, s) {
   return Math.min(size - half, Math.max(half, c));
 }
 
-// Центр наезда: центр бокса {x, y, w, h}, ограниченный так, чтобы при масштабе k видимое окно
-// (width/k × height/k) целиком оставалось внутри исходника – без чёрных полей у края кадра.
+// Центр наезда: центр бокса {x, y, w, h} В КООРДИНАТАХ ИСХОДНИКА, ограниченный так, чтобы при
+// масштабе k видимое окно (width/k × height/k) целиком оставалось внутри исходника – без чёрных
+// полей у края кадра. Экранный бокс элемента сначала переводится в исходник (screenToSource).
 export function pushCenter(targetBox, { width, height, k }) {
   return {
     cx: clampCenter(targetBox.x + targetBox.w / 2, width, k),
@@ -111,14 +128,23 @@ export function pushCenter(targetBox, { width, height, k }) {
   };
 }
 
+// Камера (s, dx, dy) рисует точку исходника q на экране в face + (q − face) · s + d
+// (speakerTransform), значит точка экрана p показывает точку исходника face + (p − face − d) / s.
+export function screenToSource(box, { s, dx, dy }, face) {
+  return { x: face.x + (box.x - face.x - dx) / s, y: face.y + (box.y - face.y - dy) / s, w: box.w / s, h: box.h / s };
+}
+
 const PUSH_EASE = Easing.bezier(0.65, 0, 0.35, 1);
-// Наезд в кадре: последний начавшийся, ещё не снятый и с известным боксом цели.
-function activePush(track, frame) {
-  let found = null;
-  for (const push of track.pushes || []) {
-    if (push.box && push.from <= frame && frame < push.until) found = push;
+// Наезд в кадре среди первых limit наездов (track.pushes отсортированы по from): последний
+// начавшийся, ещё удерживаемый (до следующего плана или панча) и с известным боксом цели. Следующий
+// наезд вытесняет предыдущий; без него (limit) виден предыдущий – это и есть стартовое состояние.
+function activePush(track, frame, limit) {
+  const pushes = track.pushes || [];
+  for (let i = Math.min(limit, pushes.length) - 1; i >= 0; i -= 1) {
+    const push = pushes[i];
+    if (push.box && push.from <= frame && frame < (push.hold ?? push.until)) return i;
   }
-  return found;
+  return -1;
 }
 
 // Уходы в кадрах (например, из полноэкранных вставок) добавляются к уже скомпилированной камере.
@@ -127,6 +153,50 @@ export function withAways(track, aways) {
 }
 
 export function cameraAt(track, frame) {
+  return withPushes(track, frame, (track.pushes || []).length);
+}
+
+// Камера с учётом первых limit наездов. Наезд ведёт центр видимого окна исходника и масштаб от
+// стартового состояния к цели. Стартовое состояние – камера в этом кадре БЕЗ этого наезда (план с
+// дрейфом, покачиванием и панчем или удержание предыдущего наезда), поэтому наезд за наездом
+// стартует из удержания, без скачка. Цель – точка исходника под центром рамки элемента в кадре
+// начала наезда (экранный бокс переведён в исходник камерой того кадра), с клэмпом окна.
+function withPushes(track, frame, limit) {
+  const plain = planAt(track, frame);
+  const i = activePush(track, frame, limit);
+  if (i < 0) return plain;
+  const push = track.pushes[i];
+  const start = i > 0 ? withPushes(track, frame, i) : plain;
+  const anchor = i > 0 ? withPushes(track, push.from, i) : planAt(track, push.from);
+  const { width: W, height: H, face } = track;
+  const t = PUSH_EASE(Math.min(1, Math.max(0, (frame - push.from) / push.frames)));
+  const target = pushCenter(screenToSource(push.box, anchor, face), { width: W, height: H, k: push.k });
+  // Центр окна исходника камеры (s, d) – face + (W/2 − face − d) / s. Окно, которое было внутри
+  // исходника, и целевое окно внутри исходника дают окно внутри на каждом промежуточном кадре
+  // (край – линейная функция плюс выпуклая 1/s); клэмп ниже – подстраховка от шума. На плане с
+  // заливкой (fill) исходное окно может выходить за исходник – края закрывает заливка, пока наезд
+  // не дошёл до конца.
+  const c0x = face.x + (W / 2 - face.x - start.dx) / start.s;
+  const c0y = face.y + (H / 2 - face.y - start.dy) / start.s;
+  const sp = start.s + (push.k - start.s) * t;
+  let cx = c0x + (target.cx - c0x) * t;
+  let cy = c0y + (target.cy - c0y) * t;
+  const fill = t >= 1 ? false : start.fill;
+  if (!fill) { cx = clampCenter(cx, W, sp); cy = clampCenter(cy, H, sp); }
+  return {
+    ...plain,
+    s: sp,
+    // requested/base плавно идут к k: G3 видит наезд как задуманный масштаб, а не «съеденный» панч.
+    requested: start.requested + (push.k - start.requested) * t,
+    base: start.base + (push.k - start.base) * t,
+    dx: W / 2 - face.x - (cx - face.x) * sp,
+    dy: H / 2 - face.y - (cy - face.y) * sp,
+    fill,
+  };
+}
+
+// Камера плана без наездов: пресет, дрейф, панчи, покачивание, размытие и уход.
+function planAt(track, frame) {
   const cfg = CAMERA_DEFAULTS;
   const fps = track.fps;
   // Все длительности cfg заданы в кадрах эталона 25 fps – переводим в кадры композиции, чтобы
@@ -173,7 +243,7 @@ export function cameraAt(track, frame) {
   }
   blur = Math.max(blur, cfg.away.blurPx * gone);
 
-  let requested = s;
+  const requested = s;
   s = Math.min(s, track.maxScale);
   // Период покачивания cfg.sway задан в секундах через кадры при 25 fps – frame * 25 / fps
   // переводит текущий кадр в «кадры на 25 fps», поэтому период колебания одинаков в секундах.
@@ -184,36 +254,9 @@ export function cameraAt(track, frame) {
     dx = Math.min((s - 1) * track.face.x, Math.max(-(s - 1) * (track.width - track.face.x), dx));
     dy = Math.min((s - 1) * track.face.y, Math.max(-(s - 1) * (track.height - track.face.y), dy));
   }
-  let fill = Boolean(preset.fill);
-  let baseScale = base;
-  const push = activePush(track, frame);
-  if (push) {
-    // Наезд ведёт центр видимого окна исходника от текущего (план с дрейфом, покачиванием и
-    // панчем) к центру бокса цели и масштаб – к push.k. Точка экрана p показывает точку исходника
-    // face + (p − face − d) / s (speakerTransform), поэтому центр окна – face + (W/2 − face − d) / s.
-    // Окно, которое было внутри исходника, и целевое окно внутри исходника дают окно внутри на
-    // каждом промежуточном кадре (край – линейная функция плюс выпуклая 1/s); клэмп ниже –
-    // подстраховка от шума. На плане с заливкой (fill) исходное окно может выходить за исходник –
-    // края закрывает заливка, пока наезд не дошёл до конца.
-    const { width: W, height: H, face } = track;
-    const t = PUSH_EASE(Math.min(1, Math.max(0, (frame - push.from) / push.frames)));
-    const target = pushCenter(push.box, { width: W, height: H, k: push.k });
-    const c0x = face.x + (W / 2 - face.x - dx) / s;
-    const c0y = face.y + (H / 2 - face.y - dy) / s;
-    const sp = s + (push.k - s) * t;
-    let cx = c0x + (target.cx - c0x) * t;
-    let cy = c0y + (target.cy - c0y) * t;
-    if (!fill) { cx = clampCenter(cx, W, sp); cy = clampCenter(cy, H, sp); }
-    dx = W / 2 - face.x - (cx - face.x) * sp;
-    dy = H / 2 - face.y - (cy - face.y) * sp;
-    requested += (push.k - requested) * t;
-    baseScale += (push.k - baseScale) * t;
-    s = sp;
-    if (t >= 1) fill = false;
-  }
   const dim = 1 - (cfg.blur.dim * Math.min(blur, cfg.blur.dimAt)) / cfg.blur.dimAt;
   const opacity = 1 - gone;
-  return { s, requested, base: baseScale, dx, dy, blur, dim, opacity, visible: opacity > 0.01, shot: shot.index, fill };
+  return { s, requested, base, dx, dy, blur, dim, opacity, visible: opacity > 0.01, shot: shot.index, fill: Boolean(preset.fill) };
 }
 
 const PUNCT = /[.,!?…:;]$/u;

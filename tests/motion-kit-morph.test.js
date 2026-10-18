@@ -149,6 +149,80 @@ test('наезд держится до ближайшего панча', () => {
   assert.ok(kit.cameraAt(track, 100).s < 1.3);
 });
 
+const centerOf = (w) => ({ x: (w.left + w.right) / 2, y: (w.top + w.bottom) / 2 });
+
+test('наезд за наездом: на границе второго наезда нет скачка масштаба и центра', () => {
+  const a = { x: 100, y: 500, w: 300, h: 200 };
+  const b = { x: 650, y: 1200, w: 300, h: 200 };
+  const track = kit.compileLayer(plan({
+    items: [still('a', 1, 9, a), still('b', 1, 9, b)],
+    camera: { face, maxScale: 1.4, shots: [{ at: 0, preset: 'W', drift: 'none' }], pushes: [{ at: 2, target: 'a', k: 1.25 }, { at: 4, target: 'b', k: 1.35 }] },
+  }), cfg).camera;
+  for (let frame = 95; frame < 120; frame += 1) {
+    const prev = kit.cameraAt(track, frame);
+    const next = kit.cameraAt(track, frame + 1);
+    const p = centerOf(windowOf(prev));
+    const n = centerOf(windowOf(next));
+    const limit = frame + 1 === 100 ? 1e-6 : 0.03;
+    assert.ok(Math.abs(next.s - prev.s) <= limit, `кадр ${frame}→${frame + 1}: s ${prev.s} → ${next.s}`);
+    if (frame + 1 === 100) assert.ok(Math.hypot(n.x - p.x, n.y - p.y) < 1, `скачок центра ${JSON.stringify(p)} → ${JSON.stringify(n)}`);
+  }
+  assert.ok(close(kit.cameraAt(track, 99).s, 1.25));
+  assert.ok(close(kit.cameraAt(track, 130).s, 1.35));
+});
+
+// Экранная точка p при камере c показывает точку исходника face + (p − face − d) / s; обратно –
+// точка исходника q видна на экране в face + (q − face) · s + d.
+const toSource = (p, c) => ({ x: face.x + (p.x - face.x - c.dx) / c.s, y: face.y + (p.y - face.y - c.dy) / c.s });
+const toScreen = (q, c) => ({ x: face.x + (q.x - face.x) * c.s + c.dx, y: face.y + (q.y - face.y) * c.s + c.dy });
+
+for (const preset of ['M', 'top']) {
+  test(`наезд на плане ${preset}: в конце наезда под центром кадра то, что было под центром элемента`, () => {
+    const el = { x: 340, y: preset === 'top' ? 1150 : 700, w: 400, h: 300 };
+    const track = kit.compileLayer(plan({
+      items: [still('el', 1, 9, el)],
+      camera: { face, maxScale: 1.4, shots: [{ at: 0, preset, drift: 'none' }], pushes: [{ at: 2, target: 'el', k: 1.35 }] },
+    }), cfg).camera;
+    const start = kit.cameraAt(track, 50);
+    const src = toSource({ x: el.x + el.w / 2, y: el.y + el.h / 2 }, start);
+    const end = kit.cameraAt(track, 62);
+    const seen = toScreen(src, end);
+    assert.ok(Math.hypot(seen.x - 540, seen.y - 960) < 1, `${preset}: ${JSON.stringify(seen)}`);
+    const w = windowOf(end);
+    assert.ok(w.left >= -1e-6 && w.top >= -1e-6 && w.right <= 1080 + 1e-6 && w.bottom <= 1920 + 1e-6, JSON.stringify(w));
+  });
+}
+
+test('наезд на плане top к элементу у верхнего края: окно у края исходника, точка элемента максимально близко к центру', () => {
+  const el = { x: 340, y: 700, w: 400, h: 300 };
+  const track = kit.compileLayer(plan({
+    items: [still('el', 1, 9, el)],
+    camera: { face, maxScale: 1.4, shots: [{ at: 0, preset: 'top', drift: 'none' }], pushes: [{ at: 2, target: 'el', k: 1.35 }] },
+  }), cfg).camera;
+  const src = toSource({ x: 540, y: 850 }, kit.cameraAt(track, 50));
+  const w = windowOf(kit.cameraAt(track, 62));
+  assert.ok(src.y < 1920 / 2.7, `точка ${src.y} должна требовать клэмпа`);
+  assert.ok(close(w.top, 0, 1e-3), JSON.stringify(w));
+  assert.ok(w.left >= -1e-6 && w.right <= 1080 + 1e-6 && w.bottom <= 1920 + 1e-6, JSON.stringify(w));
+});
+
+test('план, панч или наезд раньше конца наезда – ошибка компиляции с id; ровно в конце – можно', () => {
+  const base = { face, maxScale: 1.4, shots: [{ at: 0, preset: 'W' }] };
+  const two = [still('title-1', 1, 6), still('b', 1, 6, { x: 600, y: 900, w: 200, h: 200 })];
+  // Наезд 2 с, 12 кадров: конец – кадр 62 (2,48 с).
+  assert.throws(() => kit.compileLayer(plan({ camera: { ...base, shots: [...base.shots, { at: 2.2, preset: 'M' }], pushes: [{ at: 2, target: 'title-1' }] } }), cfg),
+    /camera\.pushes\[0\] \(title-1\): .*план/);
+  assert.throws(() => kit.compileLayer(plan({ camera: { ...base, punches: [{ at: 2.2, until: 2.6 }], pushes: [{ at: 2, target: 'title-1' }] } }), cfg),
+    /camera\.pushes\[0\] \(title-1\): .*панч/);
+  assert.throws(() => kit.compileLayer(plan({ items: two, camera: { ...base, pushes: [{ at: 2, target: 'title-1' }, { at: 2.2, target: 'b' }] } }), cfg),
+    /camera\.pushes\[0\] \(title-1\): .*наезд/);
+  const ok = kit.compileLayer(plan({ items: two, camera: {
+    // Наезд b (2,48 с) кончается в 2,96 с – ровно там панч, план после.
+    ...base, shots: [...base.shots, { at: 3.2, preset: 'M' }], punches: [{ at: 2.96, until: 3.1 }], pushes: [{ at: 2, target: 'title-1' }, { at: 2.48, target: 'b' }],
+  } }), cfg).camera;
+  assert.equal(ok.pushes.length, 2);
+});
+
 test('k больше maxScale – ошибка; без k наезд не крупнее maxScale; неизвестный target – ошибка с id', () => {
   assert.throws(
     () => kit.compileLayer(plan({ camera: { face, shots: [{ at: 0, preset: 'W' }], pushes: [{ at: 2, target: 'title-1', k: 1.35 }] } }), cfg),
