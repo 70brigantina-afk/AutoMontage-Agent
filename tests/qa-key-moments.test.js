@@ -145,3 +145,37 @@ test('ТЗ в отрывке: сцены сдвигаются на fromSec, вн
   const all = keyMoments({ brief, fromSec: 3, durationSec: 3 });
   assert.deepEqual(all.filter((m) => m.kind !== 'even').map((m) => m.timeSec), [0.3, 1.5]);
 });
+
+const sparseBrief = (n) => ({
+  scenes: Array.from({ length: n }, (_, i) => ({ scene: 'text-only', text: `сцена ${i + 1}`, start: i * 8, end: i * 8 + 8 })),
+});
+const count = (moments, kind) => moments.filter((m) => m.kind === kind).length;
+const sorted = (moments) => times(moments).every((t, i, all) => i === 0 || all[i - 1] <= t);
+
+test('прореживание до 48: все 24 события ТЗ остаются, вытесняются равномерные кадры', () => {
+  const moments = keyMoments({ brief: sparseBrief(24), durationSec: 192, max: 48 });
+  assert.equal(moments.length, 48);
+  assert.equal(count(moments, 'event'), 24);
+  assert.ok(sorted(moments));
+});
+
+test('порядок отбрасывания при обрезке: сначала even, затем hold, события последними', () => {
+  const brief = sparseBrief(24);
+  assert.ok(count(keyMoments({ brief, durationSec: 192, max: 1000 }), 'even') > 0);
+  const noEven = keyMoments({ brief, durationSec: 192, max: 48 });
+  assert.equal(count(noEven, 'even'), 0);
+  assert.equal(count(noEven, 'hold'), 24);
+  const some = keyMoments({ brief, durationSec: 192, max: 30 });
+  assert.deepEqual([count(some, 'event'), count(some, 'hold'), count(some, 'even')], [24, 6, 0]);
+  const few = keyMoments({ brief, durationSec: 192, max: 10 });
+  assert.deepEqual([few.length, count(few, 'event')], [10, 10]);
+});
+
+test('прореживание внутри типа равномерно по времени и сохраняет порядок', () => {
+  const moments = keyMoments({ brief: sparseBrief(24), durationSec: 192, max: 30 });
+  const holds = moments.filter((m) => m.kind === 'hold').map((m) => m.timeSec);
+  assert.equal(holds.length, 6);
+  assert.ok(holds[0] < 24, 'первое удержание из начала ролика');
+  assert.ok(holds[5] > 160, 'последнее удержание из конца ролика');
+  assert.ok(sorted(moments));
+});

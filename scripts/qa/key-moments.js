@@ -93,12 +93,29 @@ function mergeClose(moments) {
   return merged;
 }
 
-// Равномерное прореживание: первый и последний остаются.
+// Равномерный выбор count элементов списка по порядку: первый и последний остаются.
+function pickEvenly(list, count) {
+  if (count >= list.length) return list;
+  if (count <= 0) return [];
+  if (count === 1) return [list[0]];
+  const picked = new Set(Array.from({ length: count }, (_, k) => Math.round((k * (list.length - 1)) / (count - 1))));
+  return list.filter((_, i) => picked.has(i));
+}
+
+// Прореживание по приоритету: сначала уходят равномерные кадры, затем удержания, события – последними.
+// Тип, который не помещается целиком, прореживается равномерно по времени; результат упорядочен по времени.
 function thin(list, max) {
   if (list.length <= max) return list;
-  if (max <= 1) return list.slice(0, Math.max(0, max));
-  const picked = new Set(Array.from({ length: max }, (_, k) => Math.round((k * (list.length - 1)) / (max - 1))));
-  return list.filter((_, i) => picked.has(i));
+  const limit = Math.max(0, max);
+  const chosen = new Set();
+  let left = limit;
+  for (const kind of ['event', 'hold', 'even']) {
+    const group = list.filter((m) => (m.kind in RANK ? m.kind : 'hold') === kind);
+    const taken = pickEvenly(group, left);
+    taken.forEach((m) => chosen.add(m));
+    left -= taken.length;
+  }
+  return list.filter((m) => chosen.has(m));
 }
 
 function evenMoments(durationSec) {
