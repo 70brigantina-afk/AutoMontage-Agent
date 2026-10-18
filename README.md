@@ -284,6 +284,12 @@ Motion Review (`automontage review --project-dir projects/<id>`) пока тол
 в [reference](skills/motion-reel/references/brief-package.md), простой путь –
 в [инструкции монтажа](docs/MONTAGE-GUIDE.md#ролик-без-камеры-motion-reel).
 
+Между сценами можно ставить переходы: необязательное поле сцены ТЗ `transition` (`cut` по
+умолчанию, `fade`, `slide`, `wipe`, `push`; 6–15 кадров при 25 fps, по умолчанию 10). Правила
+выбора – в [справочнике motion-craft](skills/reel-turnkey/references/motion-craft.md#переходы), поля –
+в reference выше. В motion-слое talking-head ролика вставка может расти из элемента кадра
+(`origin`), а камера – наезжать на элемент (`pushes`): [docs/MOTION-KIT.md](docs/MOTION-KIT.md).
+
 Расписание, очереди, автопубликация и аналитика остаются будущим отдельным слоем. Движок
 создаёт локальный MP4 и не управляет аккаунтами площадок.
 
@@ -1039,7 +1045,8 @@ Remotion (анимация плашек кодом), faster-whisper (распо�
 - [docs/TAKES.md](docs/TAKES.md) – монтаж одного ролика из нескольких дублей или разных записей.
 - [docs/MONTAGE-GUIDE.md](docs/MONTAGE-GUIDE.md) – простая инструкция от исходника до final MP4.
 - [docs/SCENE-CATALOG.md](docs/SCENE-CATALOG.md) – семь официальных сцен и их возможности.
-- [docs/MOTION-KIT.md](docs/MOTION-KIT.md) – motion-слой из деталей kit, проверки G1–G12 и что
+- [docs/MOTION-KIT.md](docs/MOTION-KIT.md) – motion-слой из деталей kit, проверки G1–G12 и G16, морф вставки
+  и наезд камеры на элемент, что
   делать, если проверка остановила работу.
 - [ARCHITECTURE.md](ARCHITECTURE.md) – модули, потоки данных и границы системы.
 - [TESTING.md](TESTING.md) – от быстрых тестов до проверки готового MP4.

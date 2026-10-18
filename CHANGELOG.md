@@ -12,6 +12,10 @@
 
 ### Изменено
 
+- Документация переходов и морфа: раздел «Переходы» в `motion-craft.md` (один «большой» переход на
+  ролик, только на смене мысли, длительности и запрет HTML-in-canvas презентаций), `origin` и
+  `pushes` и гейт G16 в `docs/MOTION-KIT.md`, поле `transition` в reference motion-reel; критик
+  оценивает переходы в оси `motion`.
 - Remotion обновлён до 4.0.536 (точные версии), `@remotion/bundler` и `@remotion/renderer`
   объявлены явно.
 
