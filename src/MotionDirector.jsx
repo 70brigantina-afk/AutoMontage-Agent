@@ -1,4 +1,4 @@
-import { AbsoluteFill, Audio, Sequence, staticFile, useVideoConfig } from 'remotion';
+import { AbsoluteFill, Audio, Freeze, Sequence, staticFile, useVideoConfig } from 'remotion';
 import { FontStyle } from './fonts';
 import { sourceVolumeForFrame } from './scenes/BrollMedia';
 import { KineticTitle } from './motion/KineticTitle';
@@ -10,7 +10,10 @@ import { MediaScene } from './motion/MediaScene';
 import { CtaScene } from './motion/CtaScene';
 import { motionTheme } from './motion/motion-theme';
 import { TransitionSeries } from '@remotion/transitions';
-import { getSceneTiming, hasSceneTransitions, planSceneTransitions, presentationFor } from './motion/transitions';
+import {
+  contentFrameAt, getSceneTiming, hasSceneTransitions, planSceneTransitions, presentationFor,
+  sceneHold, transitionLead,
+} from './motion/transitions';
 
 export const MOTION_COMPONENTS = {
   'kinetic-title': KineticTitle, card: CardScene, steps: StepsScene, list: ListScene,
@@ -26,8 +29,10 @@ const sceneElement = (scene, durationInFrames) => {
 };
 
 // Режим переходов: TransitionSeries ставит сцены подряд, поэтому паузы между сценами и старт
-// первой сцены задаются offset. Содержимое сцены получает прежнюю длительность из ТЗ: удлинение
-// под переход – только хвост для наложения, анимации входа считаются как раньше.
+// первой сцены задаются offset. Содержимое сцены получает длительность из ТЗ (у push – плюс lead
+// кадров до start, анимация входа начинается в start - lead). Всё после живой части – хвост под
+// переход и пауза перед ним – стоп-кадр последнего живого кадра: Freeze держит картинку и глушит
+// звук клипа, поэтому видео не продолжается и не обрывается в пустоту.
 const renderSceneTransitions = ({ scenes, fps, width, height }) => {
   const plan = planSceneTransitions(scenes, fps);
   let cursor = 0;
@@ -38,9 +43,16 @@ const renderSceneTransitions = ({ scenes, fps, width, height }) => {
       const { presentation, timing } = presentationFor(transition, { width, height });
       items.push(<TransitionSeries.Transition key={`t${index}`} presentation={presentation} timing={timing} />);
     }
+    const lead = transitionLead(transition);
+    const { liveFrames, freezeFrame } = sceneHold({ lead, nominal: getSceneTiming(scenes[index], fps).durationInFrames });
+    const content = lead
+      ? sceneElement({ ...scenes[index], leadFrames: lead }, liveFrames)
+      : sceneElement(scenes[index], liveFrames);
     items.push(<TransitionSeries.Sequence key={`s${index}`} name={`motion-scene-${index}`}
       offset={from - natural} durationInFrames={durationInFrames}>
-      {sceneElement(scenes[index], getSceneTiming(scenes[index], fps).durationInFrames)}
+      <Freeze frame={freezeFrame} active={(frame) => contentFrameAt(frame, liveFrames) < frame}>
+        {content}
+      </Freeze>
     </TransitionSeries.Sequence>);
     cursor = from + durationInFrames;
   });

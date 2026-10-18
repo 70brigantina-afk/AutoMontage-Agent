@@ -85,8 +85,10 @@ function containsExecutableMarkup(value) {
   return false;
 }
 
-// Вход в сцену index из предыдущей. Сцена начинается ровно в start, предыдущая удлиняется на
-// длину перехода, поэтому перекрытие возможно только встык и только с достаточно длинными сценами.
+// Вход в сцену index из предыдущей. Содержимое сцены видно ровно в start; предыдущая сцена
+// тянется до start (через паузу, если она есть) и дальше на хвост перехода стоп-кадром. Переход
+// не длиннее самой сцены и предыдущей сцены (по их длине из ТЗ, без паузы). У push первая половина
+// (lead = floor(frames/2)) идёт до start, поэтому вход не может начаться раньше предыдущей сцены.
 function transitionErrors(scenes, index, fps) {
   const transition = scenes[index]?.transition;
   if (!transition || typeof transition !== 'object') return [];
@@ -97,15 +99,15 @@ function transitionErrors(scenes, index, fps) {
     return [`${at}.type: неизвестный переход "${type}", допустимо: ${MOTION_TRANSITION_TYPES.join(', ')}`];
   }
   if (type === 'cut') {
-    if (frames !== undefined) errors.push(`${at}.frames: у склейки cut нет длительности`);
-    if (direction !== undefined) errors.push(`${at}.direction: у склейки cut нет направления`);
+    if (frames !== undefined) errors.push(`${at}.frames: у склейки cut нет длительности – уберите frames`);
+    if (direction !== undefined) errors.push(`${at}.direction: у склейки cut нет направления – уберите direction`);
     return errors;
   }
   if (index === 0) {
     return [`${at}: у первой сцены нет предыдущей, входить не из чего – уберите transition или поставьте cut`];
   }
   if (direction !== undefined && !DIRECTED_TRANSITIONS.has(type)) {
-    errors.push(`${at}.direction: направление задаётся только у slide и wipe, у ${type} его нет`);
+    errors.push(`${at}.direction: направление задаётся только у slide и wipe, у ${type} его нет – уберите direction`);
   }
   if (frames !== undefined && (!Number.isInteger(frames)
     || frames < TRANSITION_FRAMES_25.min || frames > TRANSITION_FRAMES_25.max)) {
@@ -121,8 +123,12 @@ function transitionErrors(scenes, index, fps) {
   const own = bounds(scene);
   const before = bounds(prev);
   if (!own || !before) return errors;
-  if (own.from !== before.to) {
-    errors.push(`${at}: переход возможен только встык – сцена начинается на ${scene.start} с, а предыдущая заканчивается на ${prev.end} с; уберите паузу или поставьте cut`);
+  const lead = type === 'push' ? Math.floor(length / 2) : 0;
+  if (own.from - lead < before.from) {
+    errors.push(`${at}: push начинается за ${lead} кадров до start, раньше начала предыдущей сцены; укоротите frames или поставьте другой переход`);
+  }
+  if (own.from - lead < 0) {
+    errors.push(`${at}: push начинается за ${lead} кадров до start, раньше начала ролика`);
   }
   if (length > before.to - before.from) {
     errors.push(`${at}: переход (${length} кадров) длиннее предыдущей сцены (${before.to - before.from} кадров)`);
@@ -261,6 +267,7 @@ function transitionSummary(scene, index, fps) {
   const seconds = Number.isFinite(fps) && fps > 0 ? ref25(frames, fps) / fps : frames / 25;
   const parts = [transition.type, `${String(Math.round(seconds * 100) / 100).replace('.', ',')} с`];
   if (DIRECTED_TRANSITIONS.has(transition.type)) parts.push(DIRECTION_WORDS[transition.direction ?? 'left']);
+  if (transition.type === 'push') parts.push('середина на границе');
   return `Вход: ${parts.join(', ')}`;
 }
 

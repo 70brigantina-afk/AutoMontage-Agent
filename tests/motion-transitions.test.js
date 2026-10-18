@@ -105,10 +105,125 @@ test('переход длиннее своей сцены отклоняется
   assert.ok(result.errors.some((error) => error.startsWith('scenes[1].transition')), result.errors.join('; '));
 });
 
-test('переход в сцену после паузы отклоняется: входить можно только встык', () => {
-  const result = validateMotionBrief(twoScenes({ type: 'fade' }, { first: [0, 3], second: [3.5, 6] }));
-  assert.equal(result.ok, false);
-  assert.ok(result.errors.some((error) => error.startsWith('scenes[1].transition') && /встык/.test(error)), result.errors.join('; '));
+test('переход в сцену после паузы допустим: предыдущая сцена тянется через паузу', () => {
+  for (const type of ['fade', 'slide', 'wipe', 'push']) {
+    const result = validateMotionBrief(twoScenes({ type }, { first: [0, 3], second: [3.5, 6] }));
+    assert.equal(result.ok, true, `${type}: ${result.errors.join('; ')}`);
+  }
+  // Длина предыдущей сцены считается по самой сцене, без паузы.
+  const short = validateMotionBrief(twoScenes({ type: 'fade' }, { first: [0, 0.3], second: [2, 5] }));
+  assert.equal(short.ok, false);
+  assert.ok(short.errors.some((error) => error.startsWith('scenes[1].transition') && /предыдущ/.test(error)), short.errors.join('; '));
+});
+
+test('пауза 0–3 / 4–7 с fade при 30 fps: первая сцена до 4 с плюс переход, вторая ровно в 4 с', () => {
+  const { planSceneTransitions } = loadMotion('src/motion/transitions.js');
+  const value = twoScenes({ type: 'fade' }, { first: [0, 3], second: [4, 7] });
+  const plan = planSceneTransitions(value.scenes, 30);
+  assert.equal(plan[0].from, 0);
+  assert.equal(plan[0].durationInFrames, 132);
+  assert.equal(plan[1].from, 120);
+  assert.equal(plan[1].durationInFrames, 90);
+  const { MotionDirector } = loadMotion('src/MotionDirector.jsx');
+  const all = children(MotionDirector(buildMotionProps({ brief: value })));
+  const sequences = all.filter((el) => typeof el.props?.name === 'string' && el.props.name.startsWith('motion-scene-'));
+  assert.deepEqual(sequences.map((el) => [el.props.durationInFrames, el.props.offset]), [[132, 0], [90, 0]]);
+});
+
+test('push 0–3 / 3–6 при 25 fps, frames 10: середина перехода приходится на кадр start второй сцены', () => {
+  const { planSceneTransitions, transitionLead } = loadMotion('src/motion/transitions.js');
+  const value = twoScenes({ type: 'push', frames: 10 });
+  const plan = planSceneTransitions(value.scenes, 25);
+  assert.equal(transitionLead(plan[1].transition), 5);
+  assert.equal(transitionLead({ type: 'push', frames: 9 }), 4);
+  assert.equal(transitionLead({ type: 'fade', frames: 10 }), 0);
+  assert.equal(transitionLead(null), 0);
+  // Первая удлиняется на tail = 5, вторая стартует на lead = 5 раньше, перекрытие = 10.
+  assert.deepEqual(plan.map(({ from, durationInFrames }) => [from, durationInFrames]), [[0, 80], [70, 80]]);
+  assert.equal(plan[0].from + plan[0].durationInFrames - plan[1].from, 10);
+  assert.equal(plan[1].from + plan[1].transition.frames / 2, 75);
+  // Push через паузу: первая тянется до start второй минус lead, плюс перекрытие.
+  const paused = planSceneTransitions(twoScenes({ type: 'push', frames: 10 }, { first: [0, 3], second: [4, 7] }).scenes, 25);
+  assert.deepEqual(paused.map(({ from, durationInFrames }) => [from, durationInFrames]), [[0, 105], [95, 80]]);
+});
+
+test('MotionDirector с push: содержимое второй сцены длится lead + номинал, первая держит хвост стоп-кадром', () => {
+  const { MotionDirector } = loadMotion('src/MotionDirector.jsx', {
+    useVideoConfig: () => ({ width: 1080, height: 1920, fps: 25, durationInFrames: 150 }),
+  });
+  const value = brief({ output: { ...brief().output, fps: 25, durationInFrames: 150 },
+    scenes: [card(0, 3), card(3, 6, { transition: { type: 'push', frames: 10 } })] });
+  assert.equal(validateMotionBrief(value).ok, true, validateMotionBrief(value).errors.join('; '));
+  const all = children(MotionDirector(buildMotionProps({ brief: value })));
+  const sequences = all.filter((el) => typeof el.props?.name === 'string' && el.props.name.startsWith('motion-scene-'));
+  assert.deepEqual(sequences.map((el) => [el.props.durationInFrames, el.props.offset]), [[80, 0], [80, 0]]);
+  const [first, second] = sequences.map((seq) => seq.props.children);
+  // Хвост после номинального конца – стоп-кадр последнего номинального кадра.
+  assert.equal(first.props.frame, 74);
+  assert.equal(first.props.active(74), false);
+  assert.equal(first.props.active(75), true);
+  assert.equal(first.props.children.props.durationInFrames, 75);
+  assert.equal(second.props.frame, 79);
+  assert.equal(second.props.children.props.durationInFrames, 80);
+  assert.equal(second.props.children.props.leadFrames, 5);
+});
+
+test('стоп-кадр хвоста: живая часть = lead + номинал, дальше держится её последний кадр', () => {
+  const { sceneHold } = loadMotion('src/motion/transitions.js');
+  assert.deepEqual(sceneHold({ lead: 0, nominal: 90 }), { liveFrames: 90, freezeFrame: 89 });
+  assert.deepEqual(sceneHold({ lead: 5, nominal: 75 }), { liveFrames: 80, freezeFrame: 79 });
+  const { contentFrameAt } = loadMotion('src/motion/transitions.js');
+  assert.equal(contentFrameAt(10, 90), 10);
+  assert.equal(contentFrameAt(89, 90), 89);
+  assert.equal(contentFrameAt(95, 90), 89);
+  assert.equal(contentFrameAt(131, 90), 89);
+});
+
+test('push с видео во второй сцене: кадр клипа в момент start прежний, до start держится первый кадр', () => {
+  const { mediaClipFrame } = loadMotion('src/motion/MediaScene.jsx');
+  const trimBefore = 50;
+  // Без перехода в start (локальный кадр 0) клип показывает trimBefore.
+  assert.deepEqual(mediaClipFrame({ localFrame: 0, lead: 0, trimBefore }), { clipFrame: 50, hold: false });
+  // С push lead = 5: в start локальный кадр 5, клип тот же; раньше – стоп-кадр первого кадра.
+  assert.deepEqual(mediaClipFrame({ localFrame: 5, lead: 5, trimBefore }), { clipFrame: 50, hold: false });
+  assert.deepEqual(mediaClipFrame({ localFrame: 2, lead: 5, trimBefore }), { clipFrame: 50, hold: true });
+  assert.deepEqual(mediaClipFrame({ localFrame: 30, lead: 5, trimBefore }), { clipFrame: 75, hold: false });
+  const { MediaScene } = loadMotion('src/motion/MediaScene.jsx', { useCurrentFrame: () => 2 });
+  const media = { kind: 'video', src: 'assets/clip.mp4', sha256: 'a'.repeat(64), fit: 'cover', trimStartSec: 2, audioMode: 'replace' };
+  const holding = children(MediaScene({ media, durationInFrames: 80, leadFrames: 5 }));
+  const freeze = holding.find((el) => el.props?.frame === 0 && el.props?.children?.type === 'video');
+  assert.ok(freeze, 'до start видео – стоп-кадр первого кадра клипа');
+  assert.equal(freeze.props.children.props.trimBefore, 60);
+  const { MediaScene: Playing } = loadMotion('src/motion/MediaScene.jsx', { useCurrentFrame: () => 30 });
+  const playing = children(Playing({ media, durationInFrames: 80, leadFrames: 5 }));
+  const delayed = playing.find((el) => el.type === 'sequence');
+  assert.equal(delayed.props.from, 5, 'видео стартует на lead кадров позже начала содержимого');
+  const video = playing.find((el) => el.type === 'video');
+  assert.equal(video.props.trimBefore, 60);
+  // Огибающая звука клипа считается по номинальной длине сцены, как без перехода.
+  const { brollClipVolume } = loadMotion('src/scenes/BrollMedia.jsx');
+  for (const localFrame of [0, 10, 70, 74]) {
+    assert.equal(video.props.volume(localFrame),
+      brollClipVolume({ mode: 'replace', localFrame, durationInFrames: 75, fps: 30 }), `кадр ${localFrame}`);
+  }
+  // Без перехода разметка видео прежняя: ни Sequence, ни Freeze.
+  const plain = children(Playing({ media, durationInFrames: 75 }));
+  assert.equal(plain.some((el) => el.type === 'sequence'), false);
+  assert.equal(plain.find((el) => el.type === 'video').props.trimBefore, 60);
+});
+
+test('лишние поля перехода: ошибка прямо говорит, что убрать', () => {
+  const cases = [
+    [{ type: 'fade', direction: 'left' }, /уберите direction/],
+    [{ type: 'push', direction: 'up' }, /уберите direction/],
+    [{ type: 'cut', frames: 10 }, /уберите frames/],
+    [{ type: 'cut', direction: 'left' }, /уберите direction/],
+  ];
+  for (const [transition, pattern] of cases) {
+    const result = validateMotionBrief(twoScenes(transition));
+    assert.equal(result.ok, false, JSON.stringify(transition));
+    assert.ok(result.errors.some((error) => error.startsWith('scenes[1].transition') && pattern.test(error)), result.errors.join('; '));
+  }
 });
 
 test('неизвестный тип, лишние поля и direction у fade/push отклоняются', () => {
@@ -133,7 +248,7 @@ test('Markdown-ТЗ показывает тип, длительность и н�
   assert.match(rows[1], /Вход: fade, 0,4 с/);
   assert.match(rows[2], /Вход: slide, 0,6 с, вверх/);
   assert.doesNotMatch(rows[3], /Вход/);
-  assert.match(rows[4], /Вход: push, 0,23 с/);
+  assert.match(rows[4], /Вход: push, 0,23 с, середина на границе/);
 });
 
 test('presentationFor отдаёт презентацию и timing на frames кадров', () => {
@@ -182,7 +297,11 @@ test('MotionDirector с fade собирает TransitionSeries, звук и со
   assert.equal(all.filter((el) => el.type === 'sequence').length, 0);
   const sequences = all.filter((el) => typeof el.props?.name === 'string' && el.props.name.startsWith('motion-scene-'));
   assert.deepEqual(sequences.map((el) => [el.props.durationInFrames, el.props.offset]), [[102, 0], [90, 0], [90, 0]]);
-  sequences.forEach((seq) => assert.equal(seq.props.children.props.durationInFrames, 90));
+  // Содержимое – прежняя длительность из ТЗ внутри стоп-кадра хвоста.
+  sequences.forEach((seq) => {
+    assert.equal(seq.props.children.props.frame, 89);
+    assert.equal(seq.props.children.props.children.props.durationInFrames, 90);
+  });
   const transitions = all.filter((el) => el.props?.timing && el.props?.presentation);
   assert.equal(transitions.length, 1);
   assert.equal(transitions[0].props.timing.getDurationInFrames({ fps: 30 }), 12);
@@ -250,4 +369,52 @@ test('реальный кадр в середине fade не пустой и с
   const visible = (texts.at(-1) || []).join(' ');
   assert.match(visible, /Первая сцена/);
   assert.match(visible, /Вторая сцена/);
+});
+
+test('реальный кадр: хвост видео-сцены через паузу и в середине fade – стоп-кадр последнего кадра клипа', {
+  skip: process.env.AUTOMONTAGE_TEST_MOTION_RENDER !== '1', timeout: 240_000,
+}, async (t) => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const os = require('node:os');
+  const { execFileSync } = require('node:child_process');
+  const { bundle } = require('@remotion/bundler');
+  const { openBrowser, renderStill, selectComposition } = require('@remotion/renderer');
+  const { frameEdgeShare } = require('../scripts/layer/sheet');
+  const { SHARE_THRESHOLD } = require('../scripts/qa/empty-frame-gate');
+  const root = path.join(__dirname, '..');
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'motion-transition-hold-'));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+  const publicDir = path.join(work, 'public');
+  fs.mkdirSync(path.join(publicDir, 'assets'), { recursive: true });
+  const ffmpeg = process.env.AUTOMONTAGE_FFMPEG_DIR
+    ? path.join(process.env.AUTOMONTAGE_FFMPEG_DIR, 'ffmpeg') : 'ffmpeg';
+  execFileSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=6', path.join(publicDir, 'narration.wav')]);
+  // Клип ровно на длину сцены (2 с): после её конца видео продолжать нечем.
+  execFileSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=1080x1920:rate=30:duration=2',
+    '-pix_fmt', 'yuv420p', path.join(publicDir, 'assets/clip.mp4')]);
+  const serveUrl = await bundle({ entryPoint: path.join(root, 'src/index.js'), publicDir, outDir: path.join(work, 'bundle') });
+  const browser = await openBrowser('chrome', { logLevel: 'error' });
+  t.after(() => browser.close({ silent: true }));
+  // Видео 0–2 с, пауза до 2,5 с, затем fade (12 кадров при 30 fps): хвост клипа – кадры 60–86.
+  const value = brief({ output: { ...brief().output, durationInFrames: 180 }, scenes: [
+    { scene: 'media', start: 0, end: 2,
+      media: { kind: 'video', src: 'assets/clip.mp4', sha256: 'a'.repeat(64), fit: 'cover', frame: 'full' } },
+    { scene: 'card', title: 'Вторая сцена', start: 2.5, end: 5.5, transition: { type: 'fade' } },
+  ] });
+  assert.equal(validateMotionBrief(value).ok, true, validateMotionBrief(value).errors.join('; '));
+  const inputProps = buildMotionProps({ brief: value, sourceFile: 'narration.wav' });
+  const composition = await selectComposition({ serveUrl, id: 'MotionReel', inputProps, puppeteerInstance: browser });
+  const still = async (frame) => {
+    const output = path.join(work, `frame-${frame}.png`);
+    await renderStill({ serveUrl, composition: { ...composition, props: inputProps }, inputProps,
+      puppeteerInstance: browser, frame, imageFormat: 'png', output, logLevel: 'error' });
+    return output;
+  };
+  const last = await still(59);
+  const paused = await still(70);
+  assert.ok(fs.readFileSync(paused).equals(fs.readFileSync(last)), 'в паузе держится последний кадр клипа');
+  const middle = await still(81);
+  const share = frameEdgeShare(middle, null);
+  assert.ok(Number.isFinite(share) && share > SHARE_THRESHOLD, `G12 edgeShare ${share}`);
 });

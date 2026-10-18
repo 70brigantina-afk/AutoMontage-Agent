@@ -1,8 +1,13 @@
 // Переходы между сценами motion-reel. Поле transition у сцены ТЗ описывает вход в эту сцену из
-// предыдущей. Сцена начинается ровно в своём start (синхрон с дикторским текстом не меняется), а
-// предыдущая сцена удлиняется на длину перехода: TransitionSeries накладывает последние кадры
-// предыдущей сцены на первые кадры следующей, поэтому видимый таймлайн и общая длительность
-// композиции остаются прежними. Чистые функции; рендер – в src/MotionDirector.jsx.
+// предыдущей. Содержимое сцены видно ровно в своём start (синхрон с дикторским текстом не
+// меняется), а предыдущая сцена тянется до start следующей (в том числе через паузу) и дальше на
+// хвост перехода: TransitionSeries накладывает последние кадры предыдущей сцены на первые кадры
+// следующей, поэтому видимый таймлайн и общая длительность композиции остаются прежними.
+// fade, slide и wipe начинаются в start и длятся frames кадров. push толкает кадр по центру
+// границы: lead = floor(frames/2) кадров до start, tail = frames - lead после, середина push – кадр
+// start. Всё, что сцена показывает после своей живой части (lead + номинальная длина по ТЗ), –
+// стоп-кадр её последнего живого кадра: видео не продолжается, анимации не идут, звук не звучит.
+// Чистые функции; рендер – в src/MotionDirector.jsx.
 import { linearTiming, springTiming } from '@remotion/transitions';
 import { fade } from '@remotion/transitions/fade';
 import { slide } from '@remotion/transitions/slide';
@@ -39,17 +44,37 @@ export const hasSceneTransitions = (scenes = []) => scenes.some((scene, index) =
   index > 0 && scene?.transition && scene.transition.type !== 'cut'
 ));
 
-// from и durationInFrames – в кадрах; сцена перед не-cut переходом удлиняется на его frames.
+// Сколько кадров перехода приходится до start сцены: у push – половина, у остальных – ноль.
+export const transitionLead = (transition) => (
+  transition?.type === 'push' ? Math.floor(transition.frames / 2) : 0
+);
+
+// Живая часть содержимого и кадр, который держится после неё (стоп-кадр хвоста).
+export const sceneHold = ({ lead = 0, nominal }) => {
+  const liveFrames = Math.max(1, lead + nominal);
+  return { liveFrames, freezeFrame: liveFrames - 1 };
+};
+
+// Локальный кадр содержимого, который реально виден в кадре sequence localFrame.
+export const contentFrameAt = (localFrame, liveFrames) => Math.min(localFrame, liveFrames - 1);
+
+// from и durationInFrames – кадры TransitionSeries.Sequence. Сцена начинается за lead кадров до
+// своего start (lead ненулевой только у push) и тянется до начала следующей сцены (через паузу,
+// если она есть) плюс перекрытие перехода. Без перехода у следующей – прежние границы из ТЗ.
 // У первой сцены переход не учитывается: входить ей не из чего (валидатор такое ТЗ отклоняет).
 export const planSceneTransitions = (scenes = [], fps) => {
   const base = scenes.map((scene, index) => ({
     index, ...getSceneTiming(scene, fps),
     transition: index > 0 ? resolveTransition(scene.transition, fps) : null,
   }));
-  return base.map((item, index) => ({
-    ...item,
-    durationInFrames: item.durationInFrames + (base[index + 1]?.transition?.frames ?? 0),
-  }));
+  return base.map((item, index) => {
+    const from = item.from - transitionLead(item.transition);
+    const next = base[index + 1];
+    const end = next?.transition
+      ? next.from - transitionLead(next.transition) + next.transition.frames
+      : item.from + item.durationInFrames;
+    return { ...item, from, durationInFrames: end - from };
+  });
 };
 
 // Второй аргумент {width, height} – размер кадра; нынешним презентациям он не нужен (slide, wipe и
