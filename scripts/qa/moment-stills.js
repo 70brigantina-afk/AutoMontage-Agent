@@ -223,7 +223,7 @@ async function renderMomentStills({ target, moments, outDir, name, sha = inputsS
     ? deps : { ...require('./text-boxes').defaultDeps(), ...deps };
   const acquireSlot = deps.acquireSlot || acquireHeavySlotSync;
   const tile = deps.tile || sheet.tileMomentFrames;
-  const edgeShare = deps.edgeShare || ((file) => sheet.frameEdgeShare(file, 0));
+  const edgeShare = deps.edgeShare || ((file) => sheet.frameEdgeShare(file, null));
   const tmpdir = deps.tmpdir || os.tmpdir;
   fs.mkdirSync(outDir, { recursive: true });
   const work = path.join(outDir, `${name}.frames-${process.pid}-${crypto.randomBytes(4).toString('hex')}`);

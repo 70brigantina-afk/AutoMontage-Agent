@@ -80,8 +80,11 @@ function parsePgm(buffer) {
 // градиент, сглаженный шум после сильного уменьшения – везде эта доля около нуля, это и есть «пусто»
 // для G12; читаемый текст или тестовая сетка дают заметную долю даже мелким шрифтом. null – кадр не
 // удалось декодировать (не значит «пусто» само по себе, но и не «всё хорошо» – решает emptyFrameGate).
+// timeSec === null – файл-картинка (кадр критика): без -ss. FFmpeg 8+ на одиночном JPEG с -ss 0 не
+// отдаёт ни одного кадра, и G12 ложно считал все кадры пустыми.
 function frameStats(videoPath, timeSec) {
-  const result = spawnSync('ffmpeg', [...QUIET, '-ss', formatSeconds(timeSec), '-i', videoPath, '-frames:v', '1',
+  const seek = timeSec === null ? [] : ['-ss', formatSeconds(timeSec)];
+  const result = spawnSync('ffmpeg', [...QUIET, ...seek, '-i', videoPath, '-frames:v', '1',
     '-vf', `scale=${EDGE_WIDTH}:-2,format=gray`, '-f', 'image2pipe', '-vcodec', 'pgm', '-'],
     { encoding: 'buffer', maxBuffer: 4 * 1024 * 1024, shell: false });
   if (result.error || result.status !== 0 || !result.stdout || !result.stdout.length) return null;
