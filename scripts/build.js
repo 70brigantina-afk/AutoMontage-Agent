@@ -146,14 +146,16 @@ const log = (m) => console.log('· ' + m);
 // Финальный QA: повторная расшифровка готового MP4 отдельным процессом (scripts/qa/final-qa.js).
 // Только предупреждения: любой сбой – строка в логе, финал публикуется как обычно.
 // render – данные рендера для замера надписей (G14/G15): та же композиция, props и public. Зовётся
-// внутри колбэка lease, пока его publicDirectory ещё существует.
-const finalQa = (finalFile, hasMusic, render = null) => runFinalQaSync({
+// внутри колбэка lease, пока его publicDirectory ещё существует. durationSec – длительность финала
+// для предела времени дочернего QA.
+const finalQa = (finalFile, hasMusic, render = null, durationSec = null) => runFinalQaSync({
   enabled: !args.includes('--no-final-qa'),
   projectDir: buildContext.project ? buildContext.project.dir : null,
   finalPath: finalFile,
   hasMusic,
   model,
   render,
+  durationSec,
   log,
 });
 const runNodeCapture = (script, scriptArgs, stage = script) => captureTool(
@@ -518,7 +520,7 @@ if (lessonAction === 'render') {
           fps: prepared.props.fps,
           width: prepared.props.width,
           height: prepared.props.height,
-        });
+        }, prepared.props.durationInFrames / prepared.props.fps);
         return outMp4L;
       })
     ));
@@ -745,7 +747,7 @@ try {
       fps: FPS,
       width: W,
       height: H,
-    });
+    }, durF / FPS);
     return outMp4;
     });
     if (outDir) {   // глобальный запуск: положить результат рядом с пользователем

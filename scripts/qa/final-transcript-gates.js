@@ -1,5 +1,5 @@
-// Гейты F1–F5 «Расшифровка финала» – чистое сравнение того, что должно звучать (слова из
-// утверждённого brief), с тем, что расшифровано из готового MP4. Модуль не читает файлы и не
+// Гейты F1–F5 «Расшифровка финала» – чистое сравнение того, что должно звучать (слова активной
+// расшифровки проекта, manifest.transcript.words), с тем, что расшифровано из готового MP4. Модуль не читает файлы и не
 // запускает процессы; расшифровку и поиск звука между словами делает отдельный раннер.
 // Все гейты дают только pass или warn (skipped – когда нет данных для сравнения): финал
 // публикуется в любом случае, гейты лишь подсказывают, куда послушать.
@@ -13,7 +13,10 @@ const MISSING_RUN_MIN = 2;
 const EXTRA_RUN_MIN = 2;
 const SINGLE_MISSING_MIN_CHARS = 4;
 const SPANS_MAX = 10;
-// Предел расстояния правок для точного выравнивания: трасса Майерса занимает O(D^2) памяти.
+// Сколько слов пропавшего куска показывать в note: длинный обрыв не должен раздувать отчёт.
+const NOTE_WORDS_MAX = 8;
+// Предел расстояния правок для точного выравнивания: трасса Майерса хранит копию массива
+// диагоналей на каждом шаге, это O(D·limit) памяти (D – найденное расстояние, limit – этот предел).
 // Если тексты расходятся сильнее, середина считается «всё пропало, всё лишнее» – это и так
 // сигнал «финал не тот», подробности по словам уже не нужны.
 const MAX_EDIT_DISTANCE = 3000;
@@ -116,6 +119,11 @@ function missingSpan(ops, run) {
   return { fromSec, toSec: Math.max(fromSec, toSec) };
 }
 
+function shortText(list) {
+  const head = list.slice(0, NOTE_WORDS_MAX).join(' ');
+  return list.length > NOTE_WORDS_MAX ? `${head} … (+${list.length - NOTE_WORDS_MAX})` : head;
+}
+
 function result(id, title, findings, threshold, hint) {
   return gate(id, title, {
     status: findings.length ? 'warn' : 'pass',
@@ -157,7 +165,7 @@ function finalTranscriptGates({ expected, actual, voicedGaps, skipReasons = {} }
         && ops[r.from - 1].op === 'same' && ops[r.to + 1].op === 'same'
         && normalizeWord(ops[r.from].expected.w).length >= SINGLE_MISSING_MIN_CHARS;
       if (len >= MISSING_RUN_MIN || single) {
-        const text = ops.slice(r.from, r.to + 1).map((o) => o.expected.w).join(' ');
+        const text = shortText(ops.slice(r.from, r.to + 1).map((o) => o.expected.w));
         lost.push({ ...missingSpan(ops, r), note: `пропало: «${text}»` });
       }
     }
@@ -186,6 +194,6 @@ function finalTranscriptGates({ expected, actual, voicedGaps, skipReasons = {} }
 }
 
 module.exports = {
-  EXTRA_RUN_MIN, FINAL_PAUSE_MAX_SEC, MISSING_RUN_MIN, SINGLE_MISSING_MIN_CHARS, SPANS_MAX, VOICED_GAP_MIN_SEC,
+  EXTRA_RUN_MIN, FINAL_PAUSE_MAX_SEC, MISSING_RUN_MIN, NOTE_WORDS_MAX, SINGLE_MISSING_MIN_CHARS, SPANS_MAX, VOICED_GAP_MIN_SEC,
   alignWords, finalTranscriptGates, normalizeWord,
 };

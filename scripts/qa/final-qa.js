@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Финальный QA готового MP4: повторная локальная расшифровка финала (faster-whisper) и сравнение
-// с активной расшифровкой проекта (гейты F1–F5 из final-transcript-gates.js). Все гейты дают
-// только pass, warn или skipped: финал публикуется в любом случае. Ошибка раннера попадает в
-// лог и в поле error отчёта, сборку она не роняет.
+// с активной расшифровкой проекта (гейты F1–F5 из final-transcript-gates.js), обложка – кадр 0
+// (G13) и рамки надписей на кадрах финальной композиции (G14, G15). Все гейты дают только pass,
+// warn или skipped: финал публикуется в любом случае. Ошибка раннера попадает в лог и в поле
+// error отчёта, сборку она не роняет.
 //
 // build.js синхронный, поэтому зовёт этот файл отдельным процессом через runFinalQaSync
 // (флаг --from-build: код выхода всегда 0). Пользовательская команда:
@@ -152,7 +153,8 @@ async function runFinalQa({
   if (typeof finalPath !== 'string' || !finalPath) throw new Error('не указан путь к финалу');
   const dir = projectDir ? path.resolve(projectDir) : null;
   const final = path.resolve(finalPath);
-  // Без проекта отчёт кладём в qa/ рядом с финалом.
+  // Без проекта отчёт кладём в qa/ рядом с финалом; из build.js это внутренний файл сборки в out/,
+  // а не копия в --outdir.
   const reportRoot = dir || path.dirname(final);
   const errors = [];
   const hide = (text) => hidePaths(text, reportRoot);
@@ -212,11 +214,26 @@ function finalQaChildArgs({ projectDir = null, finalPath, hasMusic = false, mode
   return args;
 }
 
-// Вызов из синхронного build.js: отдельный node-процесс. Любой сбой запуска или ненулевой код –
-// строка в логе, сборка продолжается. Возвращает true, если процесс отработал.
+// Предел времени дочернего QA: Whisper и кадры идут примерно со скоростью ролика, поэтому
+// 3 × длительность финала, но не меньше 10 минут. Длительность неизвестна – 30 минут.
+const FINAL_QA_MIN_TIMEOUT_MS = 10 * 60 * 1000;
+const FINAL_QA_DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
+
+function finalQaTimeoutMs(durationSec) {
+  if (!Number.isFinite(durationSec) || durationSec <= 0) return FINAL_QA_DEFAULT_TIMEOUT_MS;
+  return Math.max(FINAL_QA_MIN_TIMEOUT_MS, Math.round(3 * durationSec * 1000));
+}
+
+const timedOut = (error) => Boolean(error && (error.code === 'ETIMEDOUT' || /ETIMEDOUT/u.test(message(error))));
+
+// Вызов из синхронного build.js: отдельный node-процесс с пределом времени. Любой сбой запуска,
+// ненулевой код или таймаут – строка в логе, сборка продолжается. Возвращает true, если процесс
+// отработал. options.durationSec – длительность финала в секундах (для предела времени).
 function runFinalQaSync(options = {}, { runNodeToolImpl = require('../process').runNodeTool } = {}) {
   const log = options.log || console.log;
   if (!options.enabled) return false;
+  log('финал собран, идёт проверка (final QA); пропустить – --no-final-qa');
+  const timeout = finalQaTimeoutMs(options.durationSec);
   // Битые данные рендера не должны отменять весь финальный QA: без них G14/G15 будут skipped.
   let render = null;
   if (options.render) {
@@ -228,10 +245,11 @@ function runFinalQaSync(options = {}, { runNodeToolImpl = require('../process').
   }
   try {
     const [script, ...args] = finalQaChildArgs({ ...options, render });
-    runNodeToolImpl(script, args, { cwd: ROOT, stage: 'final QA' });
+    runNodeToolImpl(script, args, { cwd: ROOT, stage: 'final QA', timeout });
     return true;
   } catch (error) {
-    log(`final QA не выполнен: ${message(error)}`);
+    if (timedOut(error)) log(`final QA не выполнен: проверка не уложилась в ${Math.round(timeout / 60000)} мин и остановлена`);
+    else log(`final QA не выполнен: ${message(error)}`);
     return false;
   }
 }
@@ -344,6 +362,6 @@ if (require.main === module) {
 
 module.exports = {
   DEFAULT_MODEL, FINAL_CHECKS, MUSIC_SKIP_REASON, NO_RENDER_HINT,
-  finalQaChildArgs, findVoicedGaps, main, maybeRunFinalQa, parseArgs, parseRender, readExpectedWords, runFinalQa, coverCheck, runFinalQaSync,
+  finalQaChildArgs, finalQaTimeoutMs, findVoicedGaps, main, maybeRunFinalQa, parseArgs, parseRender, readExpectedWords, runFinalQa, coverCheck, runFinalQaSync,
   textLayoutCheck, transcriptCheck,
 };

@@ -86,6 +86,11 @@ test('report summary, exit codes and the Russian text', () => {
   assert.match(text, /→ разбейте план/);
 });
 
+test('отчёт финала озаглавлен по-русски', () => {
+  const report = buildReport({ kind: 'final', profile: null, gates: [gate('F1', 'Слова-паразиты в финале')] });
+  assert.match(formatReport(report), /^Проверки \(финал\): /u);
+});
+
 // Отчёт с error – не «всё хорошо», даже если gates пуст: сборка/чтение упали раньше, чем
 // появился хоть один гейт, и это не «пройдено с предупреждениями», а «оценить нельзя».
 test('a report with an error never reads as good and always exits 2, even with an empty error string', () => {

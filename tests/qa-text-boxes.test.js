@@ -191,7 +191,7 @@ test('text-layout без данных рендера – G14/G15 skipped с по
   assert.equal(seen[0].compositionId, 'Lesson');
   assert.equal(typeof seen[0].frames, 'function');
   assert.equal(seen[0].frames({ durationInFrames: 160, fps: 25 }).length, 16);
-  assert.equal(byId(gates, 'G14').status, 'fail');
+  assert.equal(byId(gates, 'G14').status, 'warn');
   assert.equal(byId(gates, 'G15').status, 'pass');
 });
 
@@ -248,8 +248,8 @@ test('остальные блоки и части сцен урока разме
 });
 
 // Настоящий Chrome (опт-ин, как tests/layer-render-still.test.js): Dynamic с LabelTop, который стоит
-// выше безопасной зоны 9:16 (top 70 при safe.top 250) – G14 fail.
-test('реальный renderStill кадра с текстом за краем – G14 fail', {
+// выше безопасной зоны 9:16 (top 70 при safe.top 250) – G14 warn.
+test('реальный renderStill кадра с текстом за краем – G14 warn', {
   skip: process.env.AUTOMONTAGE_TEST_MOTION_RENDER !== '1', timeout: 300_000,
 }, async (t) => {
   const dir = tempDir(t, 'qa-text-boxes-real-');
@@ -265,5 +265,5 @@ test('реальный renderStill кадра с текстом за краем 
   const samples = await collectTextBoxes({ ...render, frames: [40] });
   assert.deepEqual(samples[0].boxes.map((b) => b.id), ['label-top']);
   const gates = await textLayoutCheck({ projectDir: null, finalPath: path.join(dir, 'final.mp4'), render, deps: {} });
-  assert.equal(byId(gates, 'G14').status, 'fail', JSON.stringify(gates));
+  assert.equal(byId(gates, 'G14').status, 'warn', JSON.stringify(gates));
 });

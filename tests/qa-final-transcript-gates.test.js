@@ -77,6 +77,16 @@ test('F3: два пропавших подряд – warn; «и» – pass; «п
   assert.equal(g.value, 1);
 });
 
+test('F3: длинный пропавший кусок – в note первые 8 слов и «… (+N)»; F2 note короткий', () => {
+  const lost = 'раз два три четыре пять шесть семь восемь девять десять одиннадцать двенадцать';
+  const g = byId(run(words(`начало ${lost} конец`), words('начало конец')), 'F3');
+  assert.equal(g.status, 'warn');
+  assert.equal(g.spans[0].note, 'пропало: «раз два три четыре пять шесть семь восемь … (+4)»');
+  assert.equal(byId(run(words('а б в г'), words('а г')), 'F3').spans[0].note, 'пропало: «б в»');
+  const extra = byId(run(words('начало конец'), words(`начало ${lost} конец`)), 'F2');
+  assert.equal(extra.spans[0].note, 'лишних слов подряд: 12');
+});
+
 test('F3: одиночное пропавшее на краю не считается', () => {
   assert.equal(byId(run(words('программа мы делаем'), words('мы делаем')), 'F3').status, 'pass');
 });

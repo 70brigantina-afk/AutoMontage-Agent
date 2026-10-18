@@ -1,5 +1,7 @@
 // G14 «Текст за краем» и G15 «Наложение надписей»: чистые гейты над рамками текста, которые
-// собраны с отрендеренных кадров. Ввода-вывода здесь нет.
+// собраны с отрендеренных кадров. Ввода-вывода здесь нет. Оба гейта дают только warn: часть блоков
+// движка (LabelTop, Chip, карточки) по своей вёрстке стоит вне безопасной зоны, и fail срабатывал бы
+// почти на каждом финале. Такая находка – задача движка, а не повод пересобирать ролик.
 const { gate } = require('./report');
 const { overflow, safeRect } = require('./safe-rect');
 
@@ -58,7 +60,7 @@ function textLayoutGates({ samples, width, height, error } = {}) {
   const spans = (items) => items.slice(0, MAX_SPANS).map((v) => ({ fromSec: v.timeSec, toSec: v.timeSec, note: v.note }));
   return [
     gate('G14', 'Текст за краем', {
-      status: edge.length ? 'fail' : 'pass', value: edge.length, unit: 'шт.',
+      status: edge.length ? 'warn' : 'pass', value: edge.length, unit: 'шт.',
       threshold: 'внутри безопасной зоны на каждом кадре', spans: spans(edge),
       hint: edge.length ? 'сдвиньте или сократите надпись, чтобы она целиком лежала в безопасной зоне' : '',
     }),

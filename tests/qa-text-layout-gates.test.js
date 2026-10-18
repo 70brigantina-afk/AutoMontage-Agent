@@ -7,10 +7,10 @@ const run = (boxes, width = 1080, height = 1920, timeSec = 1) => textLayoutGates
 
 test('порог наложения 0.04', () => assert.equal(OVERLAP_SHARE_MAX, 0.04));
 
-test('бокс правее безопасной зоны на 34 px – G14 fail, note «справа на 34 px»', () => {
+test('бокс правее безопасной зоны на 34 px – G14 warn, note «справа на 34 px»', () => {
   const [g14, g15] = run([box('title-2', 100, 400, 984, 500)]);
   assert.equal(g14.id, 'G14');
-  assert.equal(g14.status, 'fail');
+  assert.equal(g14.status, 'warn');
   assert.equal(g14.value, 1);
   assert.equal(g14.spans[0].note, 'title-2: справа на 34 px');
   assert.equal(g14.spans[0].fromSec, 1);
@@ -23,9 +23,9 @@ test('несколько сторон перечисляются в одной �
   for (const w of ['слева', 'сверху', 'справа', 'снизу']) assert.ok(g14.spans[0].note.includes(w));
 });
 
-test('clipped: true внутри зоны – G14 fail', () => {
+test('clipped: true внутри зоны – G14 warn', () => {
   const [g14] = run([box('title-1', 100, 400, 500, 500, true)]);
-  assert.equal(g14.status, 'fail');
+  assert.equal(g14.status, 'warn');
   assert.match(g14.spans[0].note, /title-1/);
 });
 
@@ -67,7 +67,7 @@ test('нулевая площадь не даёт деления на ноль',
 
 test('16:9 1920x1080 использует SAFE_16x9', () => {
   const [g14] = run([box('t', 100, 100, 1850, 500)], 1920, 1080);
-  assert.equal(g14.status, 'fail');
+  assert.equal(g14.status, 'warn');
   assert.equal(g14.spans[0].note, 't: справа на 10 px');
   assert.equal(run([box('t', 100, 100, 1840, 500)], 1920, 1080)[0].status, 'pass');
 });

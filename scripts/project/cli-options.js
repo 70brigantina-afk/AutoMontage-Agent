@@ -1,10 +1,11 @@
 const path = require('node:path');
 
+// Демо идёт без Whisper: без расшифровки исходника и без повторной расшифровки финала.
 function buildDemoArgs(root, cwd) {
   return [
     path.join(root, 'examples', 'demo-source.mp4'),
     '--scenario', path.join(root, 'examples', 'scenario-demo.json'),
-    '--no-transcribe', '--id', 'demo',
+    '--no-transcribe', '--no-final-qa', '--id', 'demo',
     '--outdir', path.join(cwd, 'out'),
   ];
 }

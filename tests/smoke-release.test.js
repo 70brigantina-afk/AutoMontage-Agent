@@ -161,3 +161,13 @@ test('spawned probe and decode children receive sanitized environment with the c
   assert.deepEqual(children.map(child => [child.command, child.sentinelPresent]), [['ffprobe', false], ['ffmpeg', false]]);
   assert.ok(children.every(child => child.path === env.PATH));
 });
+
+test('release smoke builds lesson and Dynamic without Whisper final QA', () => {
+  const { dynamicSmokeBuildArgs, lessonSmokeBuildArgs } = require('../scripts/smoke-release');
+  const lesson = lessonSmokeBuildArgs({ source: 'src.mp4', lessonBrief: 'brief.json', lessonId: 'l1', lessonDir: 'out/l' });
+  assert.deepEqual(lesson, ['src.mp4', '--template', 'lesson', '--brief', 'brief.json', '--frames', '75',
+    '--id', 'l1', '--outdir', 'out/l', '--no-final-qa']);
+  const dynamic = dynamicSmokeBuildArgs({ sourcePath: 'p/src.mp4', scenario: 'brief/s.json', projectDir: 'p' });
+  assert.deepEqual(dynamic, ['p/src.mp4', '--scenario', 'brief/s.json', '--project-dir', 'p', '--version-label', 'smoke',
+    '--frames', '75', '--no-transcribe', '--no-final-qa']);
+});
