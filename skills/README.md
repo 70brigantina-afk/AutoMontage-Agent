@@ -32,7 +32,8 @@
 3. Черновая нарезка своей съёмки без графики, которую подтверждает автор, и один master из
    оригинала ([порядок](reel-turnkey/references/rough-cut.md)); у аватара нарезки нет.
 4. Настоящий Remotion draft-preview и один полный пакет согласования.
-5. Финальный рендер только после явного утверждения.
+5. Финал только после явного утверждения: чистый полный 1080p preview становится финалом
+   копированием за секунды, фрагмент и 4K – рендером.
 6. Версии рендера без перезаписи прошлых вариантов.
 7. Музыка с sidechain-ducking и финальный QA.
 
@@ -77,7 +78,8 @@ API-ключи. OpenAI API допустим только после отдель
 `automontage motion <soundtrack> --project <name> --music-only`, видеоряд – project-local пакет
 из [шаблона](ai-promo/templates/motion-pack/README.md), отрендеренный без звука и подключённый
 одной `media`-сценой. Дальше обычный путь: `automontage preview` → ручной QA → явное
-«утверждаю» → `approve-brief --confirm-preview-viewed` → final. Инструкция:
+«утверждаю» → `approve-brief --confirm-preview-viewed` → final (чистый полный preview становится
+финалом сразу при утверждении). Инструкция:
 [`skills/ai-promo/SKILL.md`](ai-promo/SKILL.md).
 
 Пример запуска:

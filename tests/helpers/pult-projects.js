@@ -50,6 +50,8 @@ function addDraftProject(projectsDir, {
   final = false,
   card = null,
   scenes = null,
+  // Чистый полный preview (#110): размер вывода и quality "final" – утверждение продвинет его в финал.
+  cleanPreview = false,
 } = {}) {
   const sourcePath = path.join(path.dirname(projectsDir), `${folder}-source.mp4`);
   fs.writeFileSync(sourcePath, `source ${folder}`);
@@ -81,10 +83,11 @@ function addDraftProject(projectsDir, {
     const staged = path.join(workspace.dir, 'previews', 'stage.mp4');
     fs.writeFileSync(staged, previewBytes || `preview ${folder}`);
     previewResult = publishCurrentPreview(workspace, plan, staged, {
-      width: 160,
-      height: 90,
+      width: cleanPreview ? 320 : 160,
+      height: cleanPreview ? 180 : 90,
       fps: 25,
       generatedAt: '2026-09-20T10:05:00.000Z',
+      ...(cleanPreview ? { quality: 'final' } : {}),
     });
     workspace = reopen(workspace.dir);
   }

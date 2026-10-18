@@ -256,10 +256,25 @@ Draft имеет отдельную непередаваемую в final воз
 текущий зарегистрированный draft, выбирает `ReelScenes` или `MotionReel` по `briefs[].kind`
 через `scripts/project/brief-contract.js` и готовит props через закрытую preview-boundary,
 материализует медиа в том же изолированном bundle и выполняет Remotion → `finish.js` →
-`mix-music.js`. Отличия только технические: `--scale=min(1,1920/max(width,height))`, CRF 28 и детерминированная отметка
-«ЧЕРНОВИК». После полного decode immutable revision и `previews/current-preview.mp4` публикуются
-атомарно, а manifest обновляет только `currentPreview`; `renders`, `latestRender` и `final`
-недоступны этой границе. Approved builder по-прежнему отклоняет draft. Проверка просмотра перед approval использует
+`mix-music.js`. Полный preview в масштабе 1 (`isCleanPreview` в `scripts/working-quality.js`:
+весь ролик и `previewScale = 1`, то есть рабочие 1080p и меньше) – чистый: без CRF 28 и без
+`draftPreview`, props равны props финала, в паспорте `currentPreview.quality: "final"` (D-051).
+Фрагмент и 4K – черновые: `--scale=min(1,1920/max(width,height))`, CRF 28 и вшитая отметка
+«ЧЕРНОВИК», `quality: "draft"`. Над чистым preview «ЧЕРНОВИК» рисуют плееры пульта и Review, пока
+brief не утверждён. Для одного полноразмерного слоя kit (`scripts/layer/fast-preview.js`,
+`planKitFastPath`) чистый preview обходится без Remotion: видео слоя копируется ffmpeg (при точном
+числе кадров по `ffprobe -count_packets`; слой длиннее перекодируется ровно до длины ролика), звук
+собирается той же смесью, что у ReelScenes (голос исходника + звук слоя −18 дБ с огибающей 0,12 с,
+`audioMode` mix|mute), дальше тот же `finish.js` без сдвига звука Remotion, `mix-music.js` и барьеры;
+любое невыполненное условие – обычный рендер. После полного decode immutable revision и
+`previews/current-preview.mp4` публикуются атомарно, а manifest обновляет только `currentPreview`;
+`renders`, `latestRender` и `final` недоступны этой границе. Approved builder по-прежнему отклоняет
+draft. После утверждения `scripts/project/approve-final.js` (`finalizeApproval`, его вызывают пульт,
+Review и `approve-brief.js`) продвигает чистый полный preview в финал копированием
+(`scripts/project/promote-preview.js`): сверка sha256 черновика, исходника и байтов preview, размер и
+FPS вывода, затем `renders/vNN-preview/final.mp4`, `final/<slug>.mp4` и завершённый render
+`{source: "preview", sha256}` под lease проекта; отказ ничего не меняет, финал тогда собирает агент
+рендером. Следом ставится фоновый final QA (`scripts/qa/final-qa-job.js`, раздел 3.5). Проверка просмотра перед approval использует
 тот же масштаб через `previewScale`, а хеши и подтверждение просмотра остаются обязательными.
 Перед decode и публикацией lesson-preview проходит барьер `scripts/qa/preview-gates.js`
 (гейт L и G8, раздел 3.5): стоп строг только для слоя kit из реестра `qa/layer-imports.json`.
@@ -780,7 +795,10 @@ flowchart LR
   само нажатие «Утверждаю» и есть просьба пользователя собрать финал (DECISIONS.md D-030).
   Порядок фиксирован – approve, затем un-archive: отказ утверждения оставляет карточку в
   архиве, а отказ самого un-archive (I/O) не портит уже случившееся утверждение – только лог,
-  как и другие внутренние сбои маршрута. Если карточку убрали в архив уже ПОСЛЕ утверждения
+  как и другие внутренние сбои маршрута. Третьим идёт `finalizeApproval` (D-051): чистый полный
+  preview копируется в финал и ставится фоновый final QA; ответ `201 { ok, final }` говорит
+  странице, готов ли финал. Отказ продвижения (фрагмент, 4K, старый preview) – обычная строка
+  «Утверждено» для агента; сбой копирования – только лог без текста ошибки. Если карточку убрали в архив уже ПОСЛЕ утверждения
   (обратный порядок действий) или approveBrief вызвали не через эту кнопку (Review Workbench,
   CLI в чате), `buildCards` (`scripts/pult/cards.js`) ставит на копии варианта флаг
   `archivedNeedsFinal = archived && needsFinal` – то же условие, по которому
@@ -880,6 +898,7 @@ flowchart LR
   запросов страницы или Review.
 - `automontage inbox` (`scripts/pult/inbox.js`) читает тот же каталог: новые правки с секундой,
   кадром и пометкой «к прежней версии видео», утверждённые варианты без final (`needsFinal`),
+  состояние фоновой проверки продвинутого финала (`finalQaState`, D-051; `--ack-final-qa` отмечает её),
   повреждённый `comments.json` и правки в папках с нечитаемым паспортом или без него. Для
   каждого утверждённого без final варианта строится `cardIdFor` (`scripts/pult/cards.js`) и
   сверяется с `projects/.pult/state.json` (`readPultState`, тот же архив, что и у карточек
@@ -1106,6 +1125,20 @@ flowchart TD
   3 × длительность финала, не меньше 10 минут; без длительности – 30 минут), по таймауту – та же
   строка `final QA не выполнен: …`. `--no-final-qa` выключает вызов; ручной запуск –
   `automontage qa-final <папка>`.
+- **Фоновый final QA продвинутого финала** (`scripts/qa/final-qa-job.js`, D-051). Финал из preview
+  (раздел про draft-preview выше) проверяется не синхронно: `startFinalQaJob` пишет
+  `qa/final-qa-job.json` (`queued`, папка рендера, sha256 финала) и запускает отсоединённый процесс
+  `final-qa-job.js --run <папка> --job <id>`. Любая запись состояния идёт только в свою задачу
+  (`jobId`), поэтому процесс прежнего финала не затирает новую. Он ждёт тяжёлый слот
+  (`acquireHeavySlot`, D-044), сторож взводит только после слота, lease проекта не берёт, сверяет `latestRender` и sha256 финала (иначе `superseded`), для lesson собирает props
+  и временный public-бандл утверждённого brief (`prepareLessonRender`, `prepareRenderMediaBundle`,
+  props – в `renders/vNN-preview/props.json`) и выполняет `runFinalQa` в том же процессе; для
+  motion-reel G14/G15 skipped с причиной (`skipTextReason`), у ролика без речи (`audioRole: music`)
+  проверки расшифровки не запускаются. Итог – `done` с `verdict` и путём
+  отчёта, `failed` с ошибкой или сторож по `finalQaTimeoutMs`. `finalQaState` даёт состояние
+  текущего финала входящим (`scripts/pult/inbox.js`, строка до `--ack-final-qa`) и пульту
+  (`catalog.js` → `finalQa: {state}` → подпись под статусом); упавший процесс без записи – `failed`
+  «проверка прервана».
 - **Отчёты и коды.** `scripts/qa/report.js` строит отчёт (`buildReport`, статус `error` при
   любой ошибке), печатает его (`formatReport`) и пишет атомарно (`writeReport`). `layer check` и
   `layer render` возвращают 0 (пройдено или предупреждения), 1 (стоп) или 2 (оценить нельзя);

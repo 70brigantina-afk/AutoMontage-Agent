@@ -273,6 +273,35 @@ FFmpeg нет `libx264`, чтобы тесты не пропустились м�
 `automontage qa-final` без папки (код 2), вызов из `build.js` для lesson и Dynamic (композиция,
 props и public рендера в `--render-json`, строка «финал собран, идёт проверка») и с `--no-final-qa`,
 предел времени дочернего процесса (`finalQaTimeoutMs`) и остановку зависшей проверки по таймауту.
+Чистый preview и финал из него (#110, D-051):
+
+- `tests/clean-preview.test.js` – полный preview в масштабе 1 без `--crf` и без `draftPreview`,
+  `quality: "final"`; фрагмент и 4K – `--crf=28`, надпись вшита, `quality: "draft"`; props чистого
+  preview побитно равны props финала;
+- `tests/promote-preview.test.js` – продвижение: sha256 финала равен preview, render
+  `source: "preview"`, карточка «Готов»; повтор идемпотентен; отказ для черновика, preview до #110,
+  фрагмента, половинного размера, другого исходника, подменённых байтов и старого черновика; сбой
+  копирования не оставляет полуфинала и сохраняет прежний финал, а при неудачном возврате резервная
+  копия прежнего финала остаётся; preview, отличный от показанного при утверждении, не продвигается;
+- `tests/final-qa-job.test.js` – фоновый final QA: отсоединённый процесс, тяжёлый слот без lease
+  проекта (lease берётся из теста во время проверки), сторож только после слота, `superseded` при
+  замене финала, задача прежнего финала не затирает новую, `failed` с освобождением слота, ошибка
+  отчёта не выглядит как «предупреждения», состояние для входящих и `--ack-final-qa`;
+- `tests/layer-fast-preview.test.js` – условия быстрого пути слоя kit и выбор пути в `runPreview`
+  (без Remotion, `--audio-advance-ms 0`; при отказе – обычный рендер);
+- `tests/layer-fast-preview-equivalence.test.js` – тяжёлый: настоящий Remotion `ReelScenes` против
+  быстрого пути на 3-секундном слое на кадр длиннее ролика (путь перекодирования) – SSIM кадров ≥ 0,97
+  с приведением обоих кадров к одному диапазону (Remotion на macOS пишет полный диапазон), включая
+  последний кадр; громкость ±0,5 LU; огибающие голоса (220 Гц) и звука слоя (880 Гц) по 20 мс с
+  медианой ≤ 1,5 дБ; синхрон по прерывистому голосу – сдвиг не больше окна; длина звука каждого пути в
+  пределах 0,1 с от видео. Проверен на ffmpeg 6 (Linux) и ffmpeg 9 (macOS). В `npm test`
+  пропускается, запускается в CI-шаге настоящих preview и вручную:
+  `node --test --test-concurrency=1 tests/layer-fast-preview-equivalence.test.js`;
+- `tests/pult-server.test.js`, `tests/pult-ui.spec.js`, `tests/review-ui.spec.js`,
+  `tests/broll-preview-approval.test.js` – «Утверждаю» на чистом preview сразу даёт финал без строки
+  «Утверждено», половинный preview остаётся на пути рендера, оверлей «ЧЕРНОВИК» есть до утверждения
+  и пропадает после, Review вызывает то же продвижение.
+
 Остальные тесты финального QA и справочника движения:
 
 - `tests/qa-final-transcript-gates.test.js` – чистые гейты F1–F5: нормализация слов, выравнивание
@@ -363,7 +392,8 @@ node scripts/dynamic-gate.js path/to/scenario.json path/to/transcript.json
    `draft`, а Remotion не стартовал.
 3. Проверить исправления распознавания, сцены, тексты, таймкоды и кадрирование.
 4. Собрать настоящий draft-preview командой `automontage preview`, проверить H.264/AAC,
-   половинную геометрию, точный FPS, полный decode, метку «ЧЕРНОВИК» и full/excerpt range.
+   геометрию (1080p – полный размер без вшитой метки, 4K – половинную с меткой «ЧЕРНОВИК»),
+   точный FPS, полный decode и full/excerpt range.
    Искусственный сбой Remotion/finish/music обязан сохранить прежний `current-preview.mp4`.
 5. В Review проверить отдельные плееры **«ИСХОДНИК»** и **«СМОНТИРОВАННЫЙ ПРЕДПРОСМОТР»**;
    `/media/current-preview` требует token, поддерживает Range и отклоняет hash/symlink replacement.
@@ -486,7 +516,8 @@ node scripts/benchmark-preview.js \
 
 Каждый benchmark выполняет cold preview, второй warm preview и final через одну композицию
 `ReelScenes` и одинаковый `finish.js`; в preview меняются только утверждённые scale 0.5, CRF 28
-и watermark. Поля времени измеряют wall clock именно Remotion render-фазы: общий finishing всё
+и watermark (черновой preview 4K; чистый полный 1080p preview с финалом совпадает по props и
+после утверждения продвигается в финал без рендера, D-051). Поля времени измеряют wall clock именно Remotion render-фазы: общий finishing всё
 равно выполняется и его результат участвует в equivalence, но почти постоянная аудиообработка не
 выдаётся за ускорение графического рендера. `previewToFinalRatio` равен
 `previewWarmMs / finalMs`, поэтому критерий «не менее чем вдвое быстрее» означает значение
@@ -664,7 +695,7 @@ node --test tests/broll-preview-approval.test.js
 node --test tests/broll-render-env-security.test.js tests/env.test.js
 npm run test:review-ui
 npx remotion browser ensure
-node --test --test-concurrency=1 tests/broll-preview-e2e.test.js tests/video-broll-e2e.test.js tests/custom-face-media-real.test.js
+node --test --test-concurrency=1 tests/broll-preview-e2e.test.js tests/video-broll-e2e.test.js tests/custom-face-media-real.test.js tests/layer-fast-preview-equivalence.test.js
 node scripts/broll/live-acceptance.js
 ```
 

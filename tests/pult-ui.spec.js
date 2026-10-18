@@ -61,7 +61,7 @@ function fakeCapture(command, args) {
 // Запускает свежий пульт поверх новой временной projects/ и заменяет им общий session –
 // нужен новым тестам (leadKey, NFD-поиск, legacy .mkv), у которых фикстуры отличаются от
 // общего набора beforeEach и не должны на него влиять.
-async function restartWith(fixtures, captureImpl = fakeCapture) {
+async function restartWith(fixtures, captureImpl = fakeCapture, overrides = {}) {
   await session.close();
   ({ projectsDir } = makePultRoot(registrar));
   fixtures(projectsDir);
@@ -72,6 +72,7 @@ async function restartWith(fixtures, captureImpl = fakeCapture) {
     captureImpl,
     revealImpl: async (target) => { calls.reveal.push(target); },
     openWindowImpl: async (url) => { calls.windows.push(url); },
+    ...overrides,
   });
 }
 
@@ -1083,4 +1084,33 @@ test('the pult loads its own Onest font instead of falling back to a system one'
   expect(result.onest.status).toBe('loaded');
   const bodyFont = await page.evaluate(() => getComputedStyle(document.body).fontFamily);
   expect(bodyFont.replace(/^['"]|['"]$/g, '')).toMatch(/^Onest\b/);
+});
+
+// #110: чистый полный preview рендерится без вшитой надписи – «ЧЕРНОВИК» показывает плеер, пока brief не
+// утверждён. «Утверждаю» сразу продвигает тот же файл в финал: надпись пропадает, карточка «Готов».
+test('a clean preview shows the ЧЕРНОВИК overlay until approval gives the final at once', async ({ page }) => {
+  const { finalizeApproval } = require('../scripts/project/approve-final');
+  await restartWith((dir) => {
+    addDraftProject(dir, { folder: 'clean-clip', name: 'Чистый preview', cleanPreview: true });
+  }, fakeCapture, {
+    finalizeApprovalImpl: (workspace, approvedPath) => finalizeApproval(workspace, approvedPath, { startQa: () => ({ status: 'queued' }) }),
+  });
+  await openCard(page, 'Чистый preview');
+  const overlay = page.locator('[data-draft-overlay]');
+  await expect(overlay).toBeVisible();
+  await expect(overlay).toHaveText('ЧЕРНОВИК');
+  await page.check('[data-viewed]');
+  await page.locator('button', { hasText: 'Утверждаю' }).click();
+  await expect(page.locator('[data-notice]')).toContainText('Финал готов');
+  await expect(page.locator('[data-variant-next]')).toHaveText('Готов – можно забирать');
+  await expect(page.locator('[data-draft-overlay]')).toBeHidden();
+});
+
+test('an approved preview without a final has no ЧЕРНОВИК overlay', async ({ page }) => {
+  await restartWith((dir) => {
+    addDraftProject(dir, { folder: 'approved-clip', name: 'Утверждён без финала', approve: true });
+  });
+  await openCard(page, 'Утверждён без финала');
+  await expect(page.locator('[data-player]')).toBeVisible();
+  await expect(page.locator('[data-draft-overlay]')).toBeHidden();
 });

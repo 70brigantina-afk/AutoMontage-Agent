@@ -186,7 +186,7 @@ jobs:
         run: npx remotion browser ensure
 
       - name: Проверить настоящий preview, approval и final на синтетических медиа
-        run: node --test --test-concurrency=1 tests/broll-preview-e2e.test.js tests/video-broll-e2e.test.js tests/custom-face-media-real.test.js
+        run: node --test --test-concurrency=1 tests/broll-preview-e2e.test.js tests/video-broll-e2e.test.js tests/custom-face-media-real.test.js tests/layer-fast-preview-equivalence.test.js
 
   motion-smoke:
     name: Linux · credential-free motion release smoke

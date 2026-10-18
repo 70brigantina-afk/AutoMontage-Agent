@@ -818,3 +818,37 @@ test('approval rejects a preview that is neither the current nor the legacy size
   f.preview();
   assert.throws(() => approveBrief(f.workspace,f.draft.jsonPath,{confirmPreviewViewed:true}), /preview/i);
 });
+
+test('Review approval hands the approved brief to the same preview-to-final promotion as the pult (#110)', async (t) => {
+  const { makeReviewProject } = require('./helpers/review-project');
+  const { startReviewServer } = require('../scripts/review/server');
+  const f = makeReviewProject(t);
+  const workspace = { ...f.workspace, manifest: readProjectManifest(f.projectDir) };
+  const planned = planPreview(workspace, {
+    briefPath: f.briefPath, briefSha256: createHash('sha256').update(fs.readFileSync(f.briefPath)).digest('hex'),
+    range: { kind: 'full', fromSec: 0, toSec: 4, fromFrame: 0, toFrameExclusive: 100 },
+  });
+  const staged = path.join(f.projectDir, 'previews', '.staged.mp4');
+  fs.writeFileSync(staged, 'clean-review-preview');
+  publishCurrentPreview(workspace, planned, staged, {
+    width: 1920, height: 1080, fps: 25, generatedAt: '2026-10-18T10:05:00.000Z', quality: 'final',
+  });
+  fs.unlinkSync(staged);
+  const finalized = [];
+  const session = await startReviewServer({
+    projectDir: f.projectDir, editable: true, open: false, runToolImpl: () => ({ status: 1 }),
+    finalizeApprovalImpl: (ws, approvedPath) => { finalized.push(path.relative(f.projectDir, approvedPath)); return { promoted: true }; },
+  });
+  t.after(() => new Promise((resolve) => session.server.close(resolve)));
+  const state = await (await fetch(`${session.origin}/api/state`, { headers: { Authorization: `Bearer ${session.token}` } })).json();
+  const response = await fetch(`${session.origin}/api/broll/approve`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${session.token}`, Origin: session.origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      baseRevision: state.session.baseRevision, baseHash: state.session.baseHash,
+      manifestHash: state.session.manifestHash, confirmPreviewViewed: true,
+    }),
+  });
+  assert.equal(response.status, 201);
+  assert.deepEqual(finalized, [path.join('brief', 'v01-approved.lesson.json')]);
+});

@@ -21,6 +21,7 @@ const {
   resolveProjectPath,
   saveDraftRevision,
 } = require('../project/workspace');
+const { finalizeApproval } = require('../project/approve-final');
 const {
   listReviewAssetRecords,
   resolveReviewAsset,
@@ -1350,13 +1351,15 @@ async function routeRequest({
       }
       if (body.confirmPreviewViewed !== true)
         rejectRequest(400, 'PREVIEW_CONFIRMATION_REQUIRED');
-      approveBrief(current.workspace, current.briefFilePath, {
+      const viewedPreviewSha256 = current.workspace.manifest.currentPreview?.sha256;
+      const approved = approveBrief(current.workspace, current.briefFilePath, {
         root,
         fileSystem,
         confirmPreviewViewed: true,
-        expectedPreviewSha256:
-          current.workspace.manifest.currentPreview?.sha256,
+        expectedPreviewSha256: viewedPreviewSha256,
       });
+      // Просмотренный чистый полный preview становится финалом копированием (#110, D-051).
+      runtime.finalizeApproval(current.workspace, approved.jsonPath, { expectedPreviewSha256: viewedPreviewSha256 });
       const state = refreshRuntimeState({
         root,
         projectDir,
@@ -1653,6 +1656,7 @@ async function startReviewServer({
   brollDownload,
   brollStore,
   previewSpawnImpl,
+  finalizeApprovalImpl = finalizeApproval,
 } = {}) {
   const resolvedRoot = path.resolve(root);
   const resolvedProjectDir = path.resolve(projectDir || '');
@@ -1697,6 +1701,7 @@ async function startReviewServer({
     fileSystem,
     activeImportAbortControllers: new Set(),
     activeImportFinalizers: new Set(),
+    finalizeApproval: finalizeApprovalImpl,
   };
   runtime.previewJobs = createPreviewJobs({root:resolvedRoot,projectDir:resolvedProjectDir,getBase:()=>loadReviewBase({projectDir:resolvedProjectDir}),...(previewSpawnImpl ? { spawnImpl: previewSpawnImpl } : {})});
   runtime.discovery = createBrollDiscovery({

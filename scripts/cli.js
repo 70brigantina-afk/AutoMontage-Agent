@@ -33,11 +33,12 @@ function help() {
   automontage pult                    открыть «Пульт роликов» со всеми роликами
   automontage pult --install-shortcut создать значок пульта (macOS/Windows)
   automontage inbox                   правки и утверждения из пульта для агента
-                                      (--help: --accept, --decline-final, --restore-final)
+                                      (--help: --accept, --ack-final-qa, --decline-final, --restore-final)
   automontage queue                   состояние очереди тяжёлых задач
   automontage lead-magnet --help      лид-магниты: обещание, сборка, проверка (для агента)
   automontage preview --project-dir . --brief brief/v01-draft.lesson.json
-                                      собрать настоящий Remotion-предпросмотр draft
+                                      собрать настоящий предпросмотр draft; полный 1080p –
+                                      в качестве финала: «Утверждаю» сразу даёт финал копией
   automontage takes add --project-dir . --file take2.mp4 [--file take3.mp4]
                                       добавить дубли одного ролика и локально расшифровать каждый
   automontage takes pack --project-dir .
@@ -66,7 +67,8 @@ function help() {
                                       отчёт, что можно удалить у готовых роликов; --yes удаляет
   automontage qa-final <папка> [--final <mp4>] [--model <имя>] [--music]
                                       повторно расшифровать финал: паразиты, дубли, пропавшие слова,
-                                      паузы, вздохи – отчёт qa/final-*.txt (сборка делает это сама)
+                                      паузы, вздохи – отчёт qa/final-*.txt (сборка делает это сама,
+                                      финал из preview проверяется в фоне)
   automontage --help                  эта справка
 
 Частые опции:

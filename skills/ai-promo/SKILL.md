@@ -109,12 +109,14 @@ OAuth MCP пользователя, остальное работает лока
 14. **Утверждение** ✋. Покажи полный preview (и напомни про `automontage pult`). Только явное
     «утверждаю» пользователя к этой версии; QA, Save и просмотр утверждением не являются.
     Утверждать за пользователя через API пульта нельзя.
-15. **Final.** Если пользователь нажал «Утверждаю» в пульте (во входящих строка «Утверждено»),
-    `approveBrief` уже выполнен и `brief/vNN-approved.motion.json` есть: сразу
+15. **Final.** Утверждение полного 1080p preview сразу даёт финал копированием (D-051): пульт и
+    `approve-brief.js` (строка `final: …`) кладут просмотренный файл в `final/<slug>.mp4`, final QA
+    идёт в фоне – команду final тогда не запускай. Если после «Утверждаю» в пульте во входящих
+    строка «Утверждено» (фрагмент, 4K, старый preview), `approveBrief` уже выполнен и `brief/vNN-approved.motion.json` есть: сразу
     `automontage motion --project-dir projects/<id> --brief brief/vNN-approved.motion.json --version-label reviewed`.
     Только при явном «утверждаю» в чате сначала
     `node scripts/project/approve-brief.js projects/<id> brief/vNN-draft.motion.json --confirm-preview-viewed`,
-    затем та же команда final.
+    затем та же команда final, если `approve-brief.js` не напечатал `final: …`.
 16. **QA final** по тому же чек-листу: H.264/AAC, 1080×1920, 30 FPS, −14±1 LUFS, TP ≤ −1,5 dBTP,
     без watermark `ЧЕРНОВИК`. Отдай путь к `final/<slug>.mp4`, длительность, итог QA и потраченные кредиты.
 

@@ -116,7 +116,7 @@ test('motion initialization transcribes locally and publishes a draft scaffold w
   assert.equal(brief.output.durationInFrames, 60);
   assert.deepEqual(readProjectManifest(result.projectDir).renders, []);
 });
-test('stored motion kind chooses watermarked MotionReel preview and an audio-only no-follow bundle', (t) => {
+test('stored motion kind chooses a clean full MotionReel preview (#110) and an audio-only no-follow bundle', (t) => {
   const f = fixture(t); const calls = [];
   const result = preview(f, fakeMedia(calls));
   assert.equal(result.metadata.kind, 'full');
@@ -124,7 +124,10 @@ test('stored motion kind chooses watermarked MotionReel preview and an audio-onl
   assert.equal(result.metadata.sourceSha256, sha(fs.readFileSync(f.workspace.sourcePath)));
   const render = calls.find(call => call.stage.includes('Remotion'));
   assert.ok(render.args.includes('MotionReel'));
-  assert.equal(render.props.draftPreview, true);
+  // Полный preview в масштабе 1 – в качестве финала: без вшитого «ЧЕРНОВИК» и без CRF 28.
+  assert.equal(Object.hasOwn(render.props, 'draftPreview'), false);
+  assert.equal(render.args.some(arg => arg.startsWith('--crf')), false);
+  assert.equal(result.metadata.quality, 'final');
   assert.equal(Object.hasOwn(render.props, 'faceSrc'), false);
   assert.match(render.props.audioSrc, /^\.automontage\//);
   assert.deepEqual(readProjectManifest(f.workspace.dir).renders, []);

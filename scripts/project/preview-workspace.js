@@ -141,7 +141,8 @@ function publishCurrentPreview(workspace, planned, stagedMp4, metadata, {
   const generatedAt = String(metadata?.generatedAt || '');
   if (!Number.isSafeInteger(metadata?.width) || metadata.width <= 0
     || !Number.isSafeInteger(metadata?.height) || metadata.height <= 0
-    || !Number.isFinite(metadata?.fps) || metadata.fps <= 0 || !generatedAt) {
+    || !Number.isFinite(metadata?.fps) || metadata.fps <= 0 || !generatedAt
+    || (metadata.quality !== undefined && !['final', 'draft'].includes(metadata.quality))) {
     throw new Error('preview metadata is invalid');
   }
   const sha256 = hashFile(fileSystem, staged);
@@ -196,6 +197,7 @@ function publishCurrentPreview(workspace, planned, stagedMp4, metadata, {
         fps: metadata.fps,
         generatedAt,
         sha256,
+        ...(metadata.quality ? { quality: metadata.quality } : {}),
         ...(planned.briefSha256 ? { briefSha256: planned.briefSha256, sourceSha256: planned.sourceSha256 } : {}),
       };
       const nextManifest = structuredClone(transaction.manifest);
