@@ -119,6 +119,41 @@ test('renders level lists regenerable intermediates of a finished project', (t) 
   ]);
 });
 
+test('renders level lists all moments sets of both kinds with frames and keeps critic reports', (t) => {
+  const sets = {
+    'qa/moments-0123abcd.jpg': 'sheet',
+    'qa/moments-0123abcd-phone.jpg': 'phone',
+    'qa/moments-0123abcd.json': '{}',
+    'qa/moments-0123abcd/01-0.5.jpg': 'frame',
+    'qa/moments-stills-89abcdef.jpg': 'sheet',
+    'qa/moments-stills-89abcdef-phone.jpg': 'phone',
+    'qa/moments-stills-89abcdef.json': '{}',
+    'qa/moments-stills-89abcdef/01-0.5.jpg': 'frame',
+  };
+  const kept = {
+    'qa/critic-01.json': '{}',
+    'qa/critic-01.txt': 'report',
+    'qa/sheet-abcd1234.jpg': 'sheet',
+    'qa/moments-xyz.json': '{}',
+    'qa/moments-0123abcd-old.jpg': 'x',
+    'qa/notes/moments-0123abcd.json': '{}',
+  };
+  const { dir } = finishedProject(t, { files: { ...sets, ...kept } });
+  const listed = paths(planProjectCleanup(dir, { now: NOW }));
+  for (const file of Object.keys(sets)) assert.ok(listed.includes(file), file);
+  for (const file of Object.keys(kept)) assert.ok(!listed.includes(file), file);
+  assert.ok(!listed.includes('qa/report.json'));
+});
+
+test('applyCleanup removes moments frames folders but keeps qa and critic reports', (t) => {
+  const { root, dir } = finishedProject(t, { files: { 'qa/moments-stills-89abcdef.json': '{}', 'qa/moments-stills-89abcdef/01-0.5.jpg': 'frame', 'qa/critic-01.json': '{}' } });
+  const plan = planCleanup(root, { now: NOW });
+  applyCleanup(plan, { now: NOW });
+  assert.ok(!fs.existsSync(path.join(dir, 'qa', 'moments-stills-89abcdef')));
+  assert.ok(!fs.existsSync(path.join(dir, 'qa', 'moments-stills-89abcdef.json')));
+  assert.ok(fs.existsSync(path.join(dir, 'qa', 'critic-01.json')));
+});
+
 test('renders level never lists b-roll preview proxies', (t) => {
   const { dir } = finishedProject(t);
   const listed = paths(planProjectCleanup(dir, { now: NOW }));

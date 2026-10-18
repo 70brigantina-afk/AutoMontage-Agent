@@ -80,8 +80,11 @@ function parsePgm(buffer) {
 // градиент, сглаженный шум после сильного уменьшения – везде эта доля около нуля, это и есть «пусто»
 // для G12; читаемый текст или тестовая сетка дают заметную долю даже мелким шрифтом. null – кадр не
 // удалось декодировать (не значит «пусто» само по себе, но и не «всё хорошо» – решает emptyFrameGate).
+// timeSec === null – файл-картинка (кадр критика): без -ss. FFmpeg 8+ на одиночном JPEG с -ss 0 не
+// отдаёт ни одного кадра, и G12 ложно считал все кадры пустыми.
 function frameStats(videoPath, timeSec) {
-  const result = spawnSync('ffmpeg', [...QUIET, '-ss', formatSeconds(timeSec), '-i', videoPath, '-frames:v', '1',
+  const seek = timeSec === null ? [] : ['-ss', formatSeconds(timeSec)];
+  const result = spawnSync('ffmpeg', [...QUIET, ...seek, '-i', videoPath, '-frames:v', '1',
     '-vf', `scale=${EDGE_WIDTH}:-2,format=gray`, '-f', 'image2pipe', '-vcodec', 'pgm', '-'],
     { encoding: 'buffer', maxBuffer: 4 * 1024 * 1024, shell: false });
   if (result.error || result.status !== 0 || !result.stdout || !result.stdout.length) return null;
@@ -261,6 +264,16 @@ function layerManifestFor(projectDir, brief, warn) {
   return null;
 }
 
+// Каждый круг критика пишет новый набор кадров: после успешной записи остаются два последних набора
+// этого вида (scripts/qa/moment-sets.js). Сбой чистки – только предупреждение, команда не падает.
+function pruneOldSets(qaDir, kind, current, warn) {
+  try {
+    require('../qa/moment-sets').pruneMomentSets(qaDir, { kind, keep: 2, current, warn });
+  } catch (error) {
+    warn(`⚠️ старые наборы кадров не удалены: ${error.message}`);
+  }
+}
+
 async function runMoments({ projectDir, current, videoPath, probe, log, warn }) {
   // key-moments сам берёт sheetTimes из этого файла: ленивый require разрывает круг.
   const { keyMoments } = require('../qa/key-moments');
@@ -277,10 +290,13 @@ async function runMoments({ projectDir, current, videoPath, probe, log, warn }) 
     manifest: layer && layer.manifest, manifestOffsetSec: layer ? layer.offsetSec : 0, brief,
     fromSec: Number(current.fromSec) || 0, durationSec: probe.durationSec,
   });
+  const outDir = projectQaDir(projectDir, { create: true });
+  const name = `moments-${current.sha256.slice(0, 8)}`;
   const result = buildMomentSheet({
     videoPath, width: probe.width, height: probe.height, duration: probe.durationSec, fps: probe.fps, moments,
-    outDir: projectQaDir(projectDir, { create: true }), name: `moments-${current.sha256.slice(0, 8)}`, projectDir, previewSha256: current.sha256, log: warn,
+    outDir, name, projectDir, previewSha256: current.sha256, log: warn,
   });
+  pruneOldSets(outDir, 'preview', name, warn);
   log(`Лист моментов: ${result.sheetPath}`);
   log(`Лист для телефона: ${result.phonePath}`);
   log(`Кадры для критика: ${result.framesDir}`);
@@ -307,9 +323,12 @@ async function runStills({ projectDir, manifest, options, deps, log, warn }) {
     ? keyMoments({ manifest: target.manifest, durationSec: target.durationSec })
     : keyMoments({ brief: target.brief, durationSec: target.durationSec });
   const sha = inputsSha256(target);
+  const outDir = projectQaDir(projectDir, { create: true });
+  const name = `moments-stills-${sha.slice(0, 8)}`;
   const result = await (deps.renderStillsImpl || renderMomentStills)({
-    target, moments, outDir: projectQaDir(projectDir, { create: true }), name: `moments-stills-${sha.slice(0, 8)}`, sha, log: warn,
+    target, moments, outDir, name, sha, log: warn,
   });
+  pruneOldSets(outDir, 'stills', name, warn);
   log(`Лист моментов: ${result.sheetPath}`);
   log(`Лист для телефона: ${result.phonePath}`);
   log(`Кадры для критика: ${result.framesDir}`);

@@ -3,6 +3,7 @@ const path = require('node:path');
 const { readComments } = require('../pult/comments');
 const { deriveVariantStatus } = require('../pult/status');
 const { activeRoughCut } = require('./rough-cut-model');
+const { MOMENT_SET_ENTRY } = require('../qa/moment-sets');
 
 // Уровни чистки готового ролика. renders – промежуточные рендеры, preview, tmp и копии спикера:
 // после них ролик по-прежнему перерендеривается из своих файлов. archive – ещё промежуточные
@@ -109,6 +110,13 @@ function removableRevisions(projectDir, manifest, references, fileSystem) {
   return result;
 }
 
+function isMomentSetFile(parts) {
+  // qa/<набор>.jpg|-phone.jpg|.json – файл с суффиксом; qa/<набор>/<кадр> – папка без суффикса.
+  if (!MOMENT_SET_ENTRY.test(parts[1])) return false;
+  const hasSuffix = extension(parts[1]) !== '';
+  return parts.length === 2 ? hasSuffix : parts.length === 3 && !hasSuffix;
+}
+
 function matchesRenders(parts, speakers) {
   const [top] = parts;
   const name = parts[parts.length - 1];
@@ -116,6 +124,9 @@ function matchesRenders(parts, speakers) {
   // previews/broll/ – прокси импортированных b-roll и слоёв: движок их не пересоздаёт.
   if (top === 'previews') return parts[1] !== 'broll' && PREVIEW_MEDIA.has(extension(name));
   if (top === 'tmp') return parts.length > 1;
+  // Наборы кадров критика qa/moments-<sha8>* и qa/moments-stills-<sha8>* с папками кадров:
+  // перерисовываются заново, отчёты qa/critic-NN.* (история оценок) остаются.
+  if (top === 'qa') return isMomentSetFile(parts);
   if (!MOTION_DIR.test(top)) return false;
   if (MOTION_SCRATCH.has(parts[1]) && parts.length > 2) return true;
   return speakers.has(parts.join('/'));

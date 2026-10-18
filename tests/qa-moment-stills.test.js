@@ -428,6 +428,39 @@ test('layer sheet --source stills: моменты из манифеста сло
   assert.ok(lines.some((l) => l.includes('i.json')));
 });
 
+test('layer sheet --source stills: после записи остаются 2 последних набора stills, preview не трогается', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir } = makeLayerProject(t, { seconds: 2 });
+  fakeLayer(projectDir);
+  const qa = path.join(projectDir, 'qa');
+  fs.mkdirSync(qa, { recursive: true });
+  const writeSet = (name, minutesAgo) => {
+    fs.mkdirSync(path.join(qa, name), { recursive: true });
+    fs.writeFileSync(path.join(qa, name, '01-0.jpg'), 'f');
+    for (const suffix of ['.jpg', '-phone.jpg', '.json']) fs.writeFileSync(path.join(qa, `${name}${suffix}`), '{}');
+    const when = new Date(Date.now() - minutesAgo * 60_000);
+    fs.utimesSync(path.join(qa, `${name}.json`), when, when);
+  };
+  ['moments-stills-00000001', 'moments-stills-00000002', 'moments-stills-00000003'].forEach((name, index) => writeSet(name, 30 - index * 10));
+  writeSet('moments-00000009', 60);
+  fs.writeFileSync(path.join(qa, 'critic-01.json'), '{}');
+  const code = await sheet.run({ 'project-dir': projectDir, mode: 'moments', source: 'stills' }, {
+    log: () => {}, warn: () => {},
+    renderStillsImpl: async (input) => {
+      writeSet(input.name, 0);
+      const file = (suffix) => path.join(input.outDir, `${input.name}${suffix}`);
+      return { framesDir: path.join(input.outDir, input.name), sheetPath: file('.jpg'), phonePath: file('-phone.jpg'), indexPath: file('.json'), inputsSha256: input.sha, gate: require('../scripts/qa/empty-frame-gate').emptyFrameGate([]) };
+    },
+  });
+  assert.equal(code, 0);
+  const left = fs.readdirSync(qa).filter((name) => /^moments-.*\.json$/u.test(name)).sort();
+  assert.equal(left.length, 3);
+  assert.ok(left.includes('moments-00000009.json'));
+  assert.ok(left.includes('moments-stills-00000003.json'));
+  assert.ok(fs.existsSync(path.join(qa, 'critic-01.json')));
+  assert.ok(!fs.existsSync(path.join(qa, 'moments-stills-00000001')));
+  assert.ok(!fs.existsSync(path.join(qa, 'moments-stills-00000002.jpg')));
+});
+
 test('layer sheet: неизвестный --source и --source вне moments – код 2', async () => {
   const errors = [];
   assert.equal(await sheet.run({ 'project-dir': '/nonexistent', mode: 'moments', source: 'x' }, { log: () => {}, warn: (l) => errors.push(l) }), 2);

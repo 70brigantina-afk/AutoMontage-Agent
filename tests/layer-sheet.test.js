@@ -471,3 +471,14 @@ test('run() refuses a symlinked qa/ and writes nothing through it', { skip: !has
   await assert.rejects(run({ 'project-dir': projectDir }, { log: () => {}, warn: () => {} }), /qa\/ должна быть папкой проекта, а не ссылкой/u);
   assert.deepEqual(fs.readdirSync(elsewhere), []);
 });
+
+test('frameStats: JPEG-кадр критика читается без перемотки (timeSec null)', { skip: !hasFfmpeg }, (t) => {
+  const { frameStats } = require('../scripts/layer/sheet');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'frame-stats-jpg-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'still.jpg');
+  runTool('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=405x720', '-frames:v', '1', file]);
+  const stats = frameStats(file, null);
+  assert.ok(stats, 'кадр должен декодироваться');
+  assert.ok(stats.edgeShare > 0.001, `edgeShare ${stats && stats.edgeShare}`);
+});
