@@ -15,6 +15,7 @@ const { validateStoredBrief } = require('../project/brief-contract');
 const { readProjectManifest, resolveProjectPath, publishBriefRevision, nextRenderPaths, runRenderLifecycle, formatProjectId, writeFilesNoReplace } = require('../project/workspace');
 const { verifyApprovalPreview } = require('../project/preview-workspace');
 const { acquireHeavySlotSync, heavyQueueConfig } = require('../heavy-queue');
+const { printCleanupHint } = require('../project/clean');
 
 function parseMotionOptions(argv) {
   const options = {};
@@ -293,6 +294,8 @@ async function main(argv = process.argv.slice(2)) {
     const next = options.musicOnly ? 'Music-only: no transcript; author the scene plan to the soundtrack before preview.'
       : 'Review the transcript and author the scene plan before preview.';
     console.log(result.action === 'draft' ? `Motion draft scaffold: ${result.jsonPath}\n${next}` : `Motion final: ${result.finalPath}`);
+    // #113: после финала – сколько места освободит чистка этого ролика (без удаления).
+    if (result.action === 'render') printCleanupHint(result.projectDir);
   } catch (error) { console.error(`Motion cancelled: ${error.message}`); process.exitCode = 1; }
 }
 if (require.main === module) main();
