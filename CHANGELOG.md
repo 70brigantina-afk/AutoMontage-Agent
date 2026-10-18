@@ -5,6 +5,11 @@
 
 ## [Unreleased]
 
+### Изменено
+
+- Remotion обновлён до 4.0.536 (точные версии), `@remotion/bundler` и `@remotion/renderer`
+  объявлены явно.
+
 ### Исправлено
 
 - Наборы кадров критика больше не копятся на диске: `layer sheet --mode moments` после записи
