@@ -107,6 +107,9 @@ function deriveVariantStatus({
     status,
     nextStep,
     video,
+    // Неутверждённый preview: плееры пульта и Review показывают поверх него «ЧЕРНОВИК» (#110) – чистый
+    // полный preview сам надписи не несёт, он рендерится в качестве финала.
+    draftPreview: Boolean(video && (video.kind === 'preview' || video.kind === 'stale-preview') && currentBriefStatus === 'draft'),
     // Утвердить можно только preview: черновую нарезку подтверждают отдельной кнопкой.
     approvable: status === 'waiting' && !approvalBlocker && video?.kind === 'preview',
     needsFinal,

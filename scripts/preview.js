@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const fs = require('node:fs');
-const { previewScale, previewSize } = require('./working-quality');
+const { isCleanPreview, previewScale, previewSize } = require('./working-quality');
 const path = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
 const { spawnSync } = require('node:child_process');
@@ -30,6 +30,7 @@ const {
   resolveProjectPath,
 } = require('./project/workspace');
 const { withPreviewMediaBundle } = require('./render-media-bundle');
+const { kitFastPathCommand, planKitFastPath } = require('./layer/fast-preview');
 const { acquireHeavySlotSync, heavyQueueConfig, HEAVY_QUEUE_BUSY } = require('./heavy-queue');
 
 function parsePreviewOptions(argv) {
@@ -125,6 +126,13 @@ function cleanupPreviewStages(paths, fileSystem) {
   }
 }
 
+// Props чистого preview – те же, что у рендера финала: без ключа draftPreview (надпись «ЧЕРНОВИК» тогда
+// показывают плееры пульта и Review поверх видео, пока brief не утверждён).
+function cleanPreviewProps(props) {
+  const { draftPreview, ...clean } = props;
+  return clean;
+}
+
 function runPreview(options, dependencies = {}) {
   const fileSystem = dependencies.fileSystem || fs;
   const readProjectManifestImpl = dependencies.readProjectManifestImpl || readProjectManifest;
@@ -141,6 +149,7 @@ function runPreview(options, dependencies = {}) {
   const openMediaFileImpl = dependencies.openMediaFileImpl || openMediaFile;
   const runPreviewGatesImpl = dependencies.runPreviewGatesImpl || runPreviewGates;
   const runMotionPreviewGatesImpl = dependencies.runMotionPreviewGatesImpl || runMotionPreviewGates;
+  const planKitFastPathImpl = dependencies.planKitFastPathImpl || planKitFastPath;
   const log = dependencies.log || console.log;
   const now = dependencies.now || (() => new Date());
   const temporaryId = dependencies.temporaryId || randomUUID;
@@ -179,6 +188,8 @@ function runPreview(options, dependencies = {}) {
     ? prepareMotionPreview({ workspace, ...prepareOptions })
     : prepareLessonPreviewImpl(prepareOptions);
   const scale = previewScale(prepared.props);
+  const clean = isCleanPreview({ range: prepared.range, size: prepared.props });
+  if (clean) prepared.props = cleanPreviewProps(prepared.props);
   const planned = planPreview(workspace, {
     briefPath,
     briefSha256,
@@ -195,65 +206,88 @@ function runPreview(options, dependencies = {}) {
     label: `preview ${path.basename(projectDir)}`, config: heavyQueueConfig(), log,
   });
   try {
-    withPreviewMediaBundleImpl({
-      root: ROOT,
-      workspace,
-      props: prepared.props,
-      previewBrief: prepared.previewMedia.brief,
-      sourcePath: prepared.previewMedia.sourcePath,
-      sourceAlias: prepared.previewMedia.sourceAlias,
-      ...(kind === 'motion-reel' ? { expectedSourceSha256: sourceSha256 } : {}),
-      namespace: `${manifest.slug}-preview`,
-      temporaryId: temporaryId(),
-      fileSystem,
-    }, (lease) => {
-      if (kind === 'motion-reel') {
-        if (lease.sourceSha256 !== sourceSha256) throw new Error('preview narration snapshot hash mismatch');
-        // Publication records the digest of the bytes actually copied for Remotion.
-        planned.sourceSha256 = lease.sourceSha256;
-      }
-      fileSystem.writeFileSync(planned.propsPath, `${JSON.stringify(lease.props, null, 2)}\n`);
-      const command = remotionRenderCommand(resolveRemotionCommandImpl(ROOT), {
-        entry: 'src/index.js',
-        composition: prepared.composition,
-        output: planned.rawPath,
-        props: planned.propsPath,
-        publicDir: lease.publicDirectory,
-        scale,
-        crf: 28,
-        frameRange: prepared.range.kind === 'excerpt' ? prepared.range : null,
-        concurrency: '50%',
-        overwrite: true,
-      });
-      runToolImpl(command.command, command.args, { cwd: ROOT, stage: 'preview Remotion' });
+    // Звук после Remotion/быстрого пути: finish.js, музыка и барьер – одинаково для обоих путей.
+    const finishAndGate = ({ audioAdvanceMs, musicPath }) => {
       runNodeToolImpl(path.join(ROOT, 'scripts', 'finish.js'), [
         planned.rawPath,
         planned.finishedPath,
         '--hdrfix', 'auto',
-        '--audio-advance-ms', String(REMOTION_AUDIO_ADVANCE_MS),
+        '--audio-advance-ms', String(audioAdvanceMs),
       ], { cwd: ROOT, stage: 'preview finish' });
       if (prepared.music) {
         runNodeToolImpl(path.join(ROOT, 'scripts', 'mix-music.js'), [
           planned.finishedPath,
-          lease.musicPath || prepared.music.sourcePath,
+          musicPath,
           planned.mixedPath,
           ...prepared.music.mixArgs,
         ], { cwd: ROOT, stage: 'preview music mix' });
         stagedOutput = planned.mixedPath;
       }
-      // Барьер: по настоящим дорожкам этого preview (голос после finish.js, музыка из того же lease), пока
-      // lease жив. motion-reel сюда не входит – его brief не lesson и не собирается через layer brief;
-      // у него свой барьер motion-preview ниже.
+      // Барьер: по настоящим дорожкам этого preview (голос после finish.js, музыка того же пути). motion-reel
+      // сюда не входит – его brief не lesson и не собирается через layer brief; у него свой барьер ниже.
       if (kind !== 'motion-reel') {
         gateResult = runPreviewGatesImpl({
           projectDir, brief, manifest, hasMusic: Boolean(prepared.music), range: prepared.range, sourceSha256,
           sourcePath: sourceVideo, briefPath, briefSha256,
           finishedPath: planned.finishedPath,
-          musicPath: prepared.music ? (lease.musicPath || prepared.music.sourcePath) : null,
+          musicPath: prepared.music ? musicPath : null,
           mixArgs: prepared.music ? prepared.music.mixArgs : null,
         }, { now });
       }
+    };
+    // Быстрый путь слоя kit (#110, D-051): одна полноразмерная сцена проверенного слоя – кадры из слоя без
+    // Remotion, звук той же смесью, что у ReelScenes. Иначе – обычный рендер.
+    const fast = kind === 'motion-reel' ? null : planKitFastPathImpl({
+      projectDir, brief, props: prepared.props, range: prepared.range, clean, sourceSha256,
     });
+    if (fast && !fast.reason) {
+      log('быстрый путь слоя kit: кадры берутся из проверенного слоя, без рендера Remotion');
+      const command = kitFastPathCommand({
+        layerPath: fast.layerPath, sourcePath: sourceVideo, output: planned.rawPath,
+        frames: fast.frames, fps: fast.fps, audioMode: fast.audioMode, layerFrames: fast.layerFrames,
+      });
+      runToolImpl(command.command, command.args, { cwd: ROOT, stage: 'preview kit layer' });
+      // Звук собран без задержки Remotion: сдвигать его в finish.js не нужно.
+      finishAndGate({ audioAdvanceMs: 0, musicPath: prepared.music?.sourcePath });
+    } else {
+      if (fast?.kit) log(`быстрый путь слоя kit недоступен (${fast.reason}) – рендер Remotion`);
+      withPreviewMediaBundleImpl({
+        root: ROOT,
+        workspace,
+        props: prepared.props,
+        previewBrief: prepared.previewMedia.brief,
+        sourcePath: prepared.previewMedia.sourcePath,
+        sourceAlias: prepared.previewMedia.sourceAlias,
+        ...(kind === 'motion-reel' ? { expectedSourceSha256: sourceSha256 } : {}),
+        namespace: `${manifest.slug}-preview`,
+        temporaryId: temporaryId(),
+        fileSystem,
+      }, (lease) => {
+        if (kind === 'motion-reel') {
+          if (lease.sourceSha256 !== sourceSha256) throw new Error('preview narration snapshot hash mismatch');
+          // Publication records the digest of the bytes actually copied for Remotion.
+          planned.sourceSha256 = lease.sourceSha256;
+        }
+        fileSystem.writeFileSync(planned.propsPath, `${JSON.stringify(lease.props, null, 2)}\n`);
+        const command = remotionRenderCommand(resolveRemotionCommandImpl(ROOT), {
+          entry: 'src/index.js',
+          composition: prepared.composition,
+          output: planned.rawPath,
+          props: planned.propsPath,
+          publicDir: lease.publicDirectory,
+          scale,
+          crf: clean ? null : 28,
+          frameRange: prepared.range.kind === 'excerpt' ? prepared.range : null,
+          concurrency: '50%',
+          overwrite: true,
+        });
+        runToolImpl(command.command, command.args, { cwd: ROOT, stage: 'preview Remotion' });
+        finishAndGate({
+          audioAdvanceMs: REMOTION_AUDIO_ADVANCE_MS,
+          musicPath: prepared.music ? (lease.musicPath || prepared.music.sourcePath) : null,
+        });
+      });
+    }
 
     // Сначала вердикт, потом решение. Стоп – до полного декодирования: прошлый preview остаётся, промежуточные
     // файлы убирает finally. Слой kit без записанного отчёта не публикуется; прочим роликам сбой записи не мешает.
@@ -302,6 +336,7 @@ function runPreview(options, dependencies = {}) {
       height: probe.height,
       fps: probe.fps,
       generatedAt,
+      quality: clean ? 'final' : 'draft',
     }, { fileSystem, temporaryId });
     if (options.open !== false) {
       // The preview is already saved and registered: a browser failure is a warning, not a cancel.
@@ -339,6 +374,7 @@ function main(argv = process.argv.slice(2)) {
 if (require.main === module) main();
 
 module.exports = {
+  cleanPreviewProps,
   main,
   openMediaFile,
   previewOpenWarning,

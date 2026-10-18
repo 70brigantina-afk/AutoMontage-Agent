@@ -13,6 +13,7 @@ const { acceptLeadMagnetComment } = require('../lead-magnet/comments');
 const { DECISION_ID, LEAD_MAGNET_ID, LM_COMMENT_ID } = require('../lead-magnet/constants');
 const { buildLeadMagnetInbox, formatLeadMagnetInbox } = require('../lead-magnet/inbox');
 const { acceptDecision } = require('../lead-magnet/requests');
+const { acknowledgeFinalQa, finalQaState } = require('../qa/final-qa-job');
 
 const ROOT = path.resolve(__dirname, '../..');
 const USAGE = `Входящие пульта роликов – для агента
@@ -24,6 +25,8 @@ const USAGE = `Входящие пульта роликов – для аген�
                                                  только по явным словам пользователя в чате
   automontage inbox --restore-final <папка>      снова собрать финал этой версии –
                                                  тоже только по словам пользователя
+  automontage inbox --ack-final-qa <папка>       отметить, что отчёт фоновой проверки
+                                                 финала (final QA) просмотрен
 
 <папка> – имя папки ролика без projects/.
 Опции:
@@ -102,6 +105,17 @@ function roughCutSource(projectDir, comment, cache) {
 // готова» – само явное решение автора, поэтому строка не зависит ни от архива, ни от needsFinal.
 // «Финал не нужен» (DECISIONS.md D-050) каталог уже учёл в entry.needsFinal: отклонённая
 // версия сюда не попадает вовсе, а новое утверждение того же ролика вернёт строку само.
+// Фоновая проверка продвинутого финала (#110, DECISIONS.md D-051): идёт, пройдена, с предупреждениями или не
+// выполнена. Только про текущий финал и до отметки агента (--ack-final-qa); сбой чтения – строки нет.
+function readFinalQa(projectDir) {
+  try {
+    const { readProjectManifest } = require('../project/workspace');
+    return finalQaState(projectDir, readProjectManifest(projectDir));
+  } catch (_) {
+    return null;
+  }
+}
+
 function buildInbox({ projectsDir }) {
   const archivedIds = new Set(readPultState(projectsDir).archived);
   const byFolder = new Map();
@@ -118,6 +132,7 @@ function buildInbox({ projectsDir }) {
         comments,
         commentsBroken: broken,
         passportError: null,
+        finalQa: readFinalQa(path.join(projectsDir, entry.folder)),
         currentVideos: new Set(),
       };
       byFolder.set(entry.folder, item);
@@ -156,13 +171,14 @@ function buildInbox({ projectsDir }) {
       comments,
       commentsBroken: broken,
       passportError: problem.passportError,
+      finalQa: null,
       currentVideos: new Set(),
     });
   }
 
   return [...byFolder.values()]
     .filter((item) => item.comments.length || item.approved.length || item.roughCutConfirmed
-      || item.commentsBroken || item.passportError)
+      || item.commentsBroken || item.passportError || item.finalQa)
     .map((item) => {
       const projectDir = path.join(projectsDir, item.folder);
       const cutLists = new Map();
@@ -171,6 +187,7 @@ function buildInbox({ projectsDir }) {
         title: item.title,
         approved: item.approved,
         roughCutConfirmed: item.roughCutConfirmed,
+        finalQa: item.finalQa,
         commentsBroken: item.commentsBroken,
         passportError: item.passportError,
         comments: item.comments.map((comment) => ({
@@ -223,6 +240,22 @@ function formatInbox(items, { projectsDir, cwd = process.cwd() }) {
         ? `- Утверждено (в архиве – не начинай без просьбы пользователя): \`${briefPath}\`. По просьбе пользователя – собери финал и проведи полный QA.`
         : `- Утверждено: \`${briefPath}\`. Собери финал и проведи полный QA.`);
     }
+    if (item.finalQa) {
+      const qa = item.finalQa;
+      const ack = `\`automontage inbox --ack-final-qa ${stripControls(item.folder)}\``;
+      const report = qa.report ? `\`${stripControls(qa.report)}\`` : 'отчёт не записан';
+      if (qa.status === 'queued' || qa.status === 'running') {
+        lines.push(`- Проверка финала идёт в фоне (final QA): \`${stripControls(qa.renderDir)}\`. Финал уже готов – дождись отчёта.`);
+      } else if (qa.status === 'failed') {
+        lines.push(`- Проверка финала не выполнена (${sanitizeText(qa.error || 'причина неизвестна')}). Запусти вручную: \`automontage qa-final ${display(dir)}\`, затем отметь: ${ack}.`);
+      } else if (qa.verdict === 'error' || qa.error) {
+        lines.push(`- Проверка финала завершилась с ошибкой (${sanitizeText(qa.error || 'причина в отчёте')}): ${report}. Запусти вручную: \`automontage qa-final ${display(dir)}\`, затем отметь: ${ack}.`);
+      } else if (qa.verdict === 'pass') {
+        lines.push(`- Проверка финала пройдена: ${report}. Отметь: ${ack}.`);
+      } else {
+        lines.push(`- Проверка финала: есть предупреждения – ${report}. Посмотри отчёт и при необходимости исправь; затем отметь: ${ack}.`);
+      }
+    }
     if (item.roughCutConfirmed) {
       lines.push(`- Нарезка подтверждена: \`${stripControls(item.roughCutConfirmed)}\`. Если к ней есть правки – скопируй список в edit/vNN-source.json и внеси их по секундам исходника; затем собери master и переходи к слою.`);
     }
@@ -251,6 +284,7 @@ function parseInboxOptions(argv, { root = ROOT } = {}) {
     acceptLead: null,
     declineFinal: null,
     restoreFinal: null,
+    ackFinalQa: null,
     help: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -268,6 +302,15 @@ function parseInboxOptions(argv, { root = ROOT } = {}) {
         throw new Error('--decline-final и --restore-final: только одна папка за раз');
       }
       options[argument === '--decline-final' ? 'declineFinal' : 'restoreFinal'] = folder;
+      index += 1;
+      continue;
+    }
+    if (argument === '--ack-final-qa') {
+      const folder = argv[index + 1];
+      if (typeof folder !== 'string' || folder.startsWith('--') || !isSafeName(folder)) {
+        throw new Error('--ack-final-qa: неверная папка ролика');
+      }
+      options.ackFinalQa = folder;
       index += 1;
       continue;
     }
@@ -339,6 +382,14 @@ function main(argv = process.argv.slice(2), { write = (line) => console.log(line
     if (options.restoreFinal) {
       const briefPath = changeFinalDeclined(options.projectsDir, options.restoreFinal, false);
       write(`Финал снова нужен: ${stripControls(options.restoreFinal)} (${stripControls(briefPath)}). Утверждение вернулось во входящие.`);
+      return 0;
+    }
+    if (options.ackFinalQa) {
+      const projectDir = path.join(options.projectsDir, options.ackFinalQa);
+      const stat = fs.lstatSync(projectDir);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('папка ролика не найдена');
+      acknowledgeFinalQa(projectDir);
+      write(`Проверка финала отмечена: ${stripControls(options.ackFinalQa)}.`);
       return 0;
     }
     if (options.accept) {

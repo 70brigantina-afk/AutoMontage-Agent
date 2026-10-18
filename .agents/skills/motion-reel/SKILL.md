@@ -190,8 +190,9 @@ node scripts/qa-preview.js --project-dir projects/<id>
 automontage review --project-dir projects/<id>
 ```
 
-Preview проходит через настоящий `MotionReel`, содержит watermark `ЧЕРНОВИК` и сохраняется
-только в `previews/`. Перед публикацией его меряет автоматический барьер motion-preview
+Preview проходит через настоящий `MotionReel` и сохраняется только в `previews/`. Полный
+1080p preview собирается в качестве финала без вшитой надписи – `ЧЕРНОВИК` рисует плеер пульта,
+пока brief не утверждён; фрагмент и 4K содержат watermark `ЧЕРНОВИК` в кадре. Перед публикацией его меряет автоматический барьер motion-preview
 (`docs/MOTION-KIT.md`, D-049): чёрные провалы между сценами, громкость −14 ± 1 LUFS и true peak
 ≤ −1,5 dBTP (на полном preview), одна дорожка 48 кГц, размер и FPS кадра. При ❌ preview не
 публикуется, прошлый остаётся, причина и способ исправления – в `qa/motion-preview-full.json`:
@@ -204,8 +205,13 @@ Preview проходит через настоящий `MotionReel`, содер�
 
 ## 5. Явное утверждение, final и QA
 
-Если пользователь нажал «Утверждаю» в пульте (в `automontage inbox` строка «Утверждено»),
-`approveBrief` уже выполнен и `brief/vNN-approved.motion.json` создан – сразу собирай final:
+Утверждение чистого полного preview сразу даёт финал копированием (DECISIONS.md D-051): пульт и
+`approve-brief.js` кладут просмотренный файл в `final/<slug>.mp4`, final QA идёт в фоне (строка
+«Проверка финала…» во входящих). Тогда команду final ниже не запускай – проверь сам финал.
+
+Если пользователь нажал «Утверждаю» в пульте, а в `automontage inbox` строка «Утверждено»
+(фрагмент, 4K, preview прежней версии движка), `approveBrief` уже выполнен и
+`brief/vNN-approved.motion.json` создан – сразу собирай final:
 
 ```bash
 automontage motion --project-dir projects/<id> --brief brief/vNN-approved.motion.json --version-label reviewed
@@ -219,6 +225,8 @@ automontage motion --project-dir projects/<id> --brief brief/vNN-approved.motion
 node scripts/project/approve-brief.js projects/<id> brief/vNN-draft.motion.json --confirm-preview-viewed
 automontage motion --project-dir projects/<id> --brief brief/vNN-approved.motion.json --version-label reviewed
 ```
+
+Если `approve-brief.js` напечатал `final: …`, вторую команду не выполняй: финал уже готов.
 
 Approval связывает hashes draft, preview и narration. Только текущая зарегистрированная
 approved-копия может попасть в `renders/` и `final/`; receipt нельзя составлять вручную.

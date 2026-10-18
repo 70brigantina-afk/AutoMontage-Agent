@@ -228,12 +228,14 @@ flowchart LR
    `kinetic-title`, `card`, `steps`, `list`, `counter`, `media`, `cta`. Стандарт –
    1080×1920/30, нейтральная тема. Лицо и talking-head хук не требуются.
 4. `automontage preview --project-dir projects/<id> --brief brief/vNN-draft.motion.json`
-   создаёт настоящий `MotionReel` с отметкой «ЧЕРНОВИК». Агент проверяет его и показывает вам
-   весь ролик. Motion Review пока только для просмотра; правки запишите агенту.
+   создаёт настоящий `MotionReel`: полный 1080p – в качестве финала, «ЧЕРНОВИК» стоит на плеере
+   пульта, пока вы не утвердили. Агент проверяет его и показывает вам весь ролик. Motion Review пока только для просмотра; правки запишите агенту.
 5. После вашего явного «утверждаю эту версию» и полного просмотра агент создаёт approved-копию:
    `node scripts/project/approve-brief.js projects/<id> brief/vNN-draft.motion.json --confirm-preview-viewed`.
+   Если полный preview чистый, утверждение сразу копирует его в финал (строка `final:`), а
+   повторная проверка финала идёт в фоне – шаг 6 тогда не нужен.
 6. `automontage motion --project-dir projects/<id> --brief brief/vNN-approved.motion.json --version-label reviewed`
-   собирает final. Агент смотрит и слушает итог, проверяет текст, стыки, синхронизацию и звук;
+   собирает final (для фрагмента, 4K или старого preview). Агент смотрит и слушает итог, проверяет текст, стыки, синхронизацию и звук;
    движок до публикации проверяет decode и метаданные. Файл лежит в `final/<slug>.mp4`;
    точный путь записан в поле `final` файла `project.json` и выводится командой.
 

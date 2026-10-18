@@ -65,4 +65,11 @@ function previewSize(size) {
   return {width:even(size.width),height:even(size.height)};
 }
 
-module.exports = { QUALITIES, parseQuality, workingSize, previewScale, previewSize, orientedSampleAspectRatio };
+// Чистый preview (#110, D-051): полный ролик в масштабе 1 рендерится в качестве финала – без CRF 28 и без
+// вшитой надписи «ЧЕРНОВИК», поэтому после утверждения его байты продвигаются в финал без второго рендера.
+// Фрагмент и 4K (preview в половину) остаются черновыми, их финал собирается рендером.
+function isCleanPreview({ range, size }) {
+  return range?.kind === 'full' && previewScale(size) === 1;
+}
+
+module.exports = { QUALITIES, parseQuality, workingSize, previewScale, previewSize, isCleanPreview, orientedSampleAspectRatio };

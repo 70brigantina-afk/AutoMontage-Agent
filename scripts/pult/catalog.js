@@ -9,6 +9,7 @@ const { hashBytes } = require('./files');
 const { SAFE_NAME, isSafeName } = require('./names');
 const { declinedKey, declinedSet, readPultState } = require('./state');
 const { deriveVariantStatus, pluralEdits } = require('./status');
+const { finalQaState } = require('../qa/final-qa-job');
 
 // Ключ карточки – то же самое deny-list правило, что и для имён папок (см. names.js):
 // allow-list из букв/цифр отклонял реальные legacy-папки (NFD й/ё, скобки, плюс), их
@@ -174,8 +175,20 @@ function standardEntry(folder, projectDir, manifest, card, declined = new Set())
     reviewable: Boolean(manifest.currentBrief),
     history: renderHistory(projectDir, manifest),
     roughCutCuts: roughCutExists ? roughCutCuts(projectDir, activeCut) : [],
+    finalQa: finalQaSummary(projectDir, manifest),
     ...derived,
   };
+}
+
+// Фоновая проверка продвинутого финала (#110) для подписи под плеером: идёт, пройдена, есть замечания
+// или не выполнена. Без путей и текста ошибок – их агент читает во входящих.
+function finalQaSummary(projectDir, manifest) {
+  let job = null;
+  try { job = finalQaState(projectDir, manifest); } catch (_) { return null; }
+  if (!job) return null;
+  if (job.status === 'queued' || job.status === 'running') return { state: 'running' };
+  if (job.status === 'failed' || job.verdict === 'error' || job.error) return { state: 'failed' };
+  return { state: job.verdict === 'pass' ? 'pass' : 'warn' };
 }
 
 function legacyEntries(folder, projectDir, card) {

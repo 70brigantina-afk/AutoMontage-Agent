@@ -126,15 +126,21 @@ node scripts/qa-preview.js --project-dir projects/<id>
 
 ## 6. Утверждение и final
 
-Если пользователь нажал «Утверждаю» в пульте (в `automontage inbox` строка «Утверждено»),
-`approveBrief` уже выполнен и `brief/vNN-approved.motion.json` создан – сразу final:
+Полный preview в 1080p собирается в качестве финала без вшитого `ЧЕРНОВИК` (надпись рисует плеер
+пульта). Утверждение такого preview сразу копирует его в `final/<slug>.mp4` (DECISIONS.md D-051):
+и в пульте, и через `approve-brief.js` (строка `final: …`); повторная проверка финала идёт в фоне.
+Тогда команду final ниже не запускай.
+
+Если пользователь нажал «Утверждаю» в пульте, а в `automontage inbox` строка «Утверждено»
+(фрагмент, 4K, preview прежней версии движка), `approveBrief` уже выполнен и `brief/vNN-approved.motion.json` создан – сразу final:
 
 ```bash
 automontage motion --project-dir projects/<id> --brief brief/vNN-approved.motion.json --version-label reviewed
 ```
 
 Только при явном «утверждаю» пользователя в чате к показанной версии и подтверждении, что он
-посмотрел весь preview, сначала утверди сам brief, затем та же команда final:
+посмотрел весь preview, сначала утверди сам brief, затем та же команда final (если утверждение
+не напечатало `final: …`):
 
 ```bash
 node scripts/project/approve-brief.js projects/<id> brief/vNN-draft.motion.json --confirm-preview-viewed

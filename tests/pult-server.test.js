@@ -1602,3 +1602,52 @@ test('an idle pult shuts itself down', async (t) => {
   await idleReached;
   assert.equal(session.server.listening, false);
 });
+
+test('approving a clean full preview gives the final at once: card ready, no inbox line, same bytes (#110)', async (t) => {
+  const { projectsDir } = makePultRoot(t);
+  addDraftProject(projectsDir, { folder: 'clean-clip', name: 'Чистый', cleanPreview: true });
+  const { finalizeApproval } = require('../scripts/project/approve-final');
+  const { startFinalQaJob } = require('../scripts/qa/final-qa-job');
+  const queued = [];
+  const { session } = await startTest(t, projectsDir, {
+    finalizeApprovalImpl: (workspace, approvedPath) => finalizeApproval(workspace, approvedPath, {
+      startQa: (job) => {
+        queued.push(job);
+        // Живой pid – задача «идёт»; настоящий процесс в тесте не запускается.
+        return startFinalQaJob(job, { spawnImpl: () => ({ pid: process.pid, on() {}, unref() {} }) });
+      },
+    }),
+  });
+  const before = await variantOf(session, 'clean-clip');
+  // До утверждения чистый preview помечен для оверлея «ЧЕРНОВИК» в плеере.
+  assert.equal(before.draftPreview, true);
+  assert.equal(before.finalQa, null);
+  const previewBytes = fs.readFileSync(previewFileOf(projectsDir, 'clean-clip'));
+  const approved = await approve(session, 'clean-clip', before.approvalTicket);
+  assert.equal(approved.status, 201);
+  assert.deepEqual(approved.json, { ok: true, final: true });
+  const after = await variantOf(session, 'clean-clip');
+  assert.equal(after.status, 'ready');
+  assert.equal(after.nextStep, 'Готов – можно забирать');
+  assert.equal(after.video.kind, 'final');
+  assert.equal(after.draftPreview, false);
+  assert.deepEqual(after.finalQa, { state: 'running' });
+  assert.equal(sha256(fs.readFileSync(path.join(projectsDir, 'clean-clip', 'final', 'chistyy.mp4'))), sha256(previewBytes));
+  assert.deepEqual(queued.map((job) => job.renderDir), ['renders/v01-preview']);
+  const inbox = buildInbox({ projectsDir });
+  assert.deepEqual(inbox.filter((item) => item.folder === 'clean-clip').flatMap((item) => item.approved), []);
+});
+
+test('approving a half-size draft preview keeps the render way: «Утверждено» stays in the inbox', async (t) => {
+  const projectsDir = await standardRoot(t);
+  const { session } = await startTest(t, projectsDir, {
+    finalizeApprovalImpl: (...args) => require('../scripts/project/approve-final').finalizeApproval(...args, {
+      startQa: () => assert.fail('no final, no QA'),
+    }),
+  });
+  const ticket = (await variantOf(session, 'waiting-clip')).approvalTicket;
+  const approved = await approve(session, 'waiting-clip', ticket);
+  assert.deepEqual(approved.json, { ok: true, final: false });
+  const inbox = buildInbox({ projectsDir });
+  assert.equal(inbox.find((item) => item.folder === 'waiting-clip').approved.length, 1);
+});

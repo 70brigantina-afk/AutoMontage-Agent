@@ -262,4 +262,4 @@ function runPreviewGates({ projectDir, brief, manifest, hasMusic, words, range, 
   return result;
 }
 
-module.exports = { readProjectWords, runPreviewGates };
+module.exports = { entryProblem, readProjectWords, runPreviewGates };
