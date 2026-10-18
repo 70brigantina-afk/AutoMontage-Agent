@@ -1,25 +1,22 @@
 import { AbsoluteFill, OffthreadVideo, Sequence, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
-import { assertCompiledInsert, insertOpacity, KB_DEFAULT, revealCard, revealProgress } from './inserts.js';
+import { assertCompiledInsert, insertOpacity, insertRect, KB_DEFAULT } from './inserts.js';
 import { isShown } from './motion.js';
 
 export function FullscreenReveal({ insert, children }) {
   assertCompiledInsert(insert, 'FullscreenReveal');
   const frame = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
-  const p = revealProgress(frame, insert, fps);
-  if (p === null) return null;
+  const rect = insertRect(frame, insert, { fps, width, height });
+  if (rect === null) return null;
   const opacity = insertOpacity(frame, insert, fps);
   // Тот же порог видимости, что и у KitBox (isShown/VISIBLE_MIN): на последнем отрисованном
   // кадре close (to − 1, на высоком fps иногда и соседнем) opacity уже практически 0 – не
   // декодируем и не рисуем фактически невидимый кадр вставки.
   if (!isShown({ o: opacity })) return null;
-  const card = revealCard(width, height);
-  const inset = (value) => (value * (1 - p)).toFixed(1);
-  // Тот же коэффициент, что и safeRect: ширина к канону 1080 (портрет) / 1920 (ландшафт) – радиус
-  // скругления масштабируется вместе с реальным разрешением композиции.
-  const portrait = height > width;
-  const radius = 28 * (width / (portrait ? 1080 : 1920));
-  const clipPath = `inset(${inset(card.top)}px ${inset(card.right)}px ${inset(card.bottom)}px ${inset(card.left)}px round ${(radius * (1 - p)).toFixed(1)}px)`;
+  // Рамка – от бокса элемента origin (или карточки safe-зоны) до полного кадра (insertRect); без
+  // origin это тот же inset карточки × (1 − p), что и раньше.
+  const px = (value) => `${Math.max(0, value).toFixed(1)}px`;
+  const clipPath = `inset(${px(rect.y)} ${px(width - rect.x - rect.w)} ${px(height - rect.y - rect.h)} ${px(rect.x)} round ${px(rect.radius)})`;
   return <AbsoluteFill data-kit-bleed={insert.id} style={{ clipPath, opacity }}>{children}</AbsoluteFill>;
 }
 
