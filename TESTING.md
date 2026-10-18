@@ -1105,3 +1105,20 @@ AUTOMONTAGE_TEST_MOTION_RENDER=1 node --test tests/motion-kit-render.test.js tes
 4. Глазами в preview – кадры входов и выходов карточек и вставок, первые 3 с (спикер виден),
    стыки вставок (спикер резкий до закрытия вставки), громкость эффектов и музыки под речью.
 5. После правок пульта – полоски `qa/sheet-<…>-comment-<id>.jpg` вокруг каждой правки.
+6. Цикл критика: `automontage layer sheet --mode moments --project-dir projects/<ролик>` даёт
+   кадры, лист и телефонный лист в `qa/moments-<sha8>*` и индекс `qa/moments-<sha8>.json`; для
+   ТЗ с одной длинной сценой к событиям добавляются равномерные кадры. Отчёт критика проверяет
+   `automontage critic --project-dir projects/<ролик> --report <файл.json>`: код 2 для отчёта к
+   другому preview, к уже оценённому preview и для отчёта с ошибкой оценок; решение «исправлять»
+   или «остановиться» и файлы `qa/critic-NN.json|txt` при успехе.
+
+Автотесты цикла критика (без Remotion):
+
+- `tests/qa-key-moments.test.js` – моменты из манифеста и ТЗ, отрывок, слияние, предел 48,
+  равномерные кадры для длинной сцены, ссылка элемента без `id`;
+- `tests/layer-sheet-moments.test.js` – `layer sheet --mode moments` на настоящем ffmpeg: размеры
+  кадров, лист 4 колонки, телефонный лист 360 px, индекс с `previewSha256`;
+- `tests/qa-critic.test.js` – проверка отчёта, оценки, решение и правила остановки, цепочка
+  кругов, повторный отчёт к тому же preview;
+- `tests/motion-critic-instructions.test.js` – задание критика, определение субагента (только
+  чтение) и копии motion-reel в `.agents/` и `.codex/`.
