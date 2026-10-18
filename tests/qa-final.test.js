@@ -300,6 +300,55 @@ test('runFinalQaSync: зависший QA убивается по таймаут
   ]);
 });
 
+// Настоящий путь супервизора тяжёлой очереди: таймаут -> launchError ETIMEDOUT -> строка в логе.
+// Дочерний QA запускает «Chrome» отдельной группой процессов (detached, как Remotion): kill(-pgid)
+// супервизора её не достаёт, на macOS нет setpriv. Сирота держала бы слот до AUTOMONTAGE_HEAVY_WAIT_MS.
+test('runFinalQaSync: таймаут под тяжёлым слотом добивает отдельные группы из тикетов и освобождает слот', { skip: process.platform === 'win32' }, async (t) => {
+  const { runNodeTool } = require('../scripts/process');
+  const { tryAcquireHeavySlot, listHeavySlots, heavyQueueConfig } = require('../scripts/heavy-queue');
+  // Хуки after идут по порядку регистрации: сначала добиваем «Chrome» по pid из файла, потом
+  // удаляем временную папку (tempDir здесь не подходит – его хук отработал бы раньше).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-final-heavy-'));
+  const marker = path.join(dir, 'detached.pid');
+  t.after(() => {
+    try { process.kill(Number(fs.readFileSync(marker, 'utf8')), 'SIGKILL'); } catch (_) { /* уже нет */ }
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const hang = path.join(dir, 'hang.js');
+  fs.writeFileSync(hang, [
+    "const { spawn } = require('node:child_process');",
+    "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });",
+    `require('node:fs').writeFileSync(${JSON.stringify(marker)}, String(child.pid));`,
+    'setInterval(() => {}, 1000);',
+  ].join('\n'));
+  const alive = (pid) => {
+    try { process.kill(pid, 0); return true; } catch (error) { return error.code !== 'ESRCH'; }
+  };
+
+  const config = heavyQueueConfig();
+  const slot = tryAcquireHeavySlot({ label: 'final QA timeout', config });
+  assert.ok(slot);
+  const lines = [];
+  let ok;
+  try {
+    ok = runFinalQaSync({ enabled: true, finalPath: path.join(dir, 'f.mp4'), durationSec: 400, log: (m) => lines.push(m) }, {
+      runNodeToolImpl: (_script, _args, options) => runNodeTool(hang, [], { ...options, timeout: 1500 }),
+    });
+  } finally {
+    slot.release();
+  }
+  assert.equal(ok, false);
+  assert.equal(lines[1], 'final QA не выполнен: проверка не уложилась в 20 мин и остановлена');
+  const pid = Number(fs.readFileSync(marker, 'utf8'));
+  const end = Date.now() + 3000;
+  while (alive(pid) && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(alive(pid), false, 'отдельная группа дочернего QA должна быть убита');
+  assert.equal(listHeavySlots(config)[0].busy, false);
+  const next = tryAcquireHeavySlot({ label: 'следующая сборка', config });
+  assert.ok(next, 'слот должен быть свободен для следующей сборки');
+  next.release();
+});
+
 test('final-qa.js --from-build: внутренняя ошибка – код 0, отчёт с ошибкой рядом с финалом', (t) => {
   const dir = tempDir(t);
   const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'qa', 'final-qa.js'), '--from-build', '--final', path.join(dir, 'missing.mp4')], { encoding: 'utf8' });

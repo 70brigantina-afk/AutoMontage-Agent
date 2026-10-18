@@ -245,7 +245,9 @@ function runFinalQaSync(options = {}, { runNodeToolImpl = require('../process').
   }
   try {
     const [script, ...args] = finalQaChildArgs({ ...options, render });
-    runNodeToolImpl(script, args, { cwd: ROOT, stage: 'final QA', timeout });
+    // reapOnFailure: при таймауте или аварии добить отдельные группы процессов (Chrome Remotion),
+    // записанные в тикетах тяжёлого слота, – иначе слот не освободится (macOS: нет setpriv).
+    runNodeToolImpl(script, args, { cwd: ROOT, stage: 'final QA', timeout, reapOnFailure: true });
     return true;
   } catch (error) {
     if (timedOut(error)) log(`final QA не выполнен: проверка не уложилась в ${Math.round(timeout / 60000)} мин и остановлена`);
