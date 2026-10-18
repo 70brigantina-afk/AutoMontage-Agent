@@ -5,7 +5,9 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const { applyCleanup, main, planCleanup, planProjectCleanup } = require('../scripts/project/clean');
+const {
+  applyCleanup, cleanupHint, formatSize, main, planCleanup, planProjectCleanup, printCleanupHint,
+} = require('../scripts/project/clean');
 const {
   addDraftProject, bumpSourceRevision, makePultRoot, republishRoughCut,
 } = require('./helpers/pult-projects');
@@ -486,4 +488,176 @@ test('regression: a file timestamp slightly ahead of now is age 0, not negative'
   const changed = fs.statSync(path.join(dir, 'project.json')).mtimeMs;
   const plan = planProjectCleanup(dir, { minAgeDays: 0, now: new Date(changed - 5) });
   assert.equal(plan.status, 'eligible');
+});
+
+// #113: чистка одного ролика сразу после финала. --project чистит только эту папку, пауза по
+// умолчанию 0 дней; остальные проверки planProjectCleanup – те же.
+function freshFinished(t) {
+  const projects = projectsWithTwoFinished(t);
+  const recent = new Date(Date.now() - 60 * 1000);
+  for (const name of ['a', 'b']) {
+    age(path.join(projects, name), 'project.json', recent);
+    age(path.join(projects, name), 'final/demo.mp4', recent);
+  }
+  return projects;
+}
+
+test('clean --project removes files of that folder only and keeps the others', (t) => {
+  const projects = projectsWithTwoFinished(t);
+  const out = capture();
+  assert.equal(main(['--projects-dir', projects, '--project', 'a', '--yes'], { now: NOW, log: out.log, error: out.log }), 0);
+  assert.ok(!fs.existsSync(path.join(projects, 'a', 'tmp', 'a.wav')));
+  assert.ok(fs.existsSync(path.join(projects, 'b', 'tmp', 'a.wav')));
+  assert.ok(fs.existsSync(path.join(projects, 'b', 'previews', 'v01-draft-full.mp4')));
+  assert.doesNotMatch(out.text(), /\bb:/);
+});
+
+test('clean --project accepts the projects/<folder> form the inbox prints', (t) => {
+  const projects = projectsWithTwoFinished(t);
+  const out = capture();
+  assert.equal(main(['--projects-dir', projects, '--project', 'projects/a/', '--yes'], { now: NOW, log: out.log, error: out.log }), 0);
+  assert.ok(!fs.existsSync(path.join(projects, 'a', 'tmp', 'a.wav')));
+  assert.ok(fs.existsSync(path.join(projects, 'b', 'tmp', 'a.wav')));
+});
+
+test('a fresh final is cleaned with --project, while the general run skips it as changed 0 days ago', (t) => {
+  const projects = freshFinished(t);
+  const general = capture();
+  assert.equal(main(['--projects-dir', projects, '--yes'], { log: general.log, error: general.log }), 0);
+  assert.match(general.text(), /a: пропущен – менялся 0 дн\. назад/);
+  assert.ok(fs.existsSync(path.join(projects, 'a', 'tmp', 'a.wav')));
+
+  const single = capture();
+  assert.equal(main(['--projects-dir', projects, '--project', 'a', '--yes'], { log: single.log, error: single.log }), 0);
+  assert.ok(!fs.existsSync(path.join(projects, 'a', 'tmp', 'a.wav')));
+  assert.ok(fs.existsSync(path.join(projects, 'b', 'tmp', 'a.wav')));
+});
+
+test('clean --project still honours an explicit --min-age-days', (t) => {
+  const projects = freshFinished(t);
+  const out = capture();
+  assert.equal(main(['--projects-dir', projects, '--project', 'a', '--min-age-days', '3', '--yes'], { log: out.log, error: out.log }), 0);
+  assert.match(out.text(), /пропущен – менялся 0 дн\. назад/);
+  assert.ok(fs.existsSync(path.join(projects, 'a', 'tmp', 'a.wav')));
+});
+
+test('clean --project --level archive keeps final, current brief, layer sources, original and active revision', (t) => {
+  const projects = freshFinished(t);
+  assert.equal(main(['--projects-dir', projects, '--project', 'a', '--level', 'archive', '--yes'], { log: () => {}, error: () => {} }), 0);
+  const a = path.join(projects, 'a');
+  for (const kept of ['final/demo.mp4', APPROVED, 'motion-v01/src/Root.jsx', 'motion-v01/layer.json',
+    'motion-v01/public/fonts/Onest.ttf', 'input/source.mp4', 'input/source-v03.mp4',
+    'assets/broll/video/abc/media.mp4', 'previews/broll/abc.webm', 'transcript/words.json', 'edit/v03-source.json']) {
+    assert.ok(fs.existsSync(path.join(a, ...kept.split('/'))), kept);
+  }
+  for (const removed of ['input/source-v02.mp4', 'assets/broll/video/old/media.mp4', 'tmp/a.wav', 'renders/v01-x/raw.mp4']) {
+    assert.ok(!fs.existsSync(path.join(a, ...removed.split('/'))), removed);
+  }
+});
+
+test('clean --project keeps the other safety checks: lock and pending pult edits', (t) => {
+  const projects = projectsWithTwoFinished(t);
+  put(path.join(projects, 'a'), '.project-mutation.lock', '{}');
+  put(path.join(projects, 'b'), 'pult/comments.json', JSON.stringify({ version: 1, comments: [comment('new')] }));
+  for (const [name, reason] of [['a', /идёт работа \(lock\)/], ['b', /не готов в пульте/]]) {
+    const out = capture();
+    assert.equal(main(['--projects-dir', projects, '--project', name, '--yes'], { now: NOW, log: out.log, error: out.log }), 0);
+    assert.match(out.text(), reason);
+    assert.ok(fs.existsSync(path.join(projects, name, 'tmp', 'a.wav')));
+  }
+});
+
+test('clean --project without --yes lists the files of that folder', (t) => {
+  const projects = projectsWithTwoFinished(t);
+  const out = capture();
+  assert.equal(main(['--projects-dir', projects, '--project', 'a'], { now: NOW, log: out.log, error: out.log }), 0);
+  assert.match(out.text(), /tmp\/a\.wav/);
+  assert.match(out.text(), /renders\/v01-x\/raw\.mp4/);
+  assert.ok(fs.existsSync(path.join(projects, 'a', 'tmp', 'a.wav')));
+});
+
+test('clean --project rejects names outside projects and missing folders', (t) => {
+  const projects = projectsWithTwoFinished(t);
+  for (const value of ['..', '../a', 'a/../b', '/etc', '.archive', 'missing']) {
+    const out = capture();
+    assert.equal(main(['--projects-dir', projects, '--project', value, '--yes'], { now: NOW, log: out.log, error: out.log }), 1, value);
+    assert.match(out.text(), /--project/, value);
+  }
+  assert.ok(fs.existsSync(path.join(projects, '.archive', 'old.mp4')));
+});
+
+test('cleanupHint names the archive size and the exact command for a fresh final', (t) => {
+  const projects = freshFinished(t);
+  const dir = path.join(projects, 'a');
+  const plan = planProjectCleanup(dir, { level: 'archive', minAgeDays: 0 });
+  assert.equal(cleanupHint(dir), `Можно освободить ${formatSize(plan.bytes)}: automontage clean --projects-dir ${projects} --project a --level archive --yes`);
+});
+
+// Ролик вне projects/ движка: строка называет его папку проектов, и её команда чистит именно его.
+test('the command from the hint cleans exactly that reel', (t) => {
+  const projects = freshFinished(t);
+  const command = cleanupHint(path.join(projects, 'a')).split(': automontage clean ')[1].split(' ');
+  assert.equal(main(command, { log: () => {}, error: () => {} }), 0);
+  assert.ok(!fs.existsSync(path.join(projects, 'a', 'tmp', 'a.wav')));
+  assert.ok(fs.existsSync(path.join(projects, 'b', 'tmp', 'a.wav')));
+});
+
+test('cleanupHint is null when there is nothing to free, when the project is not finished or unreadable', (t) => {
+  const projects = freshFinished(t);
+  const dir = path.join(projects, 'a');
+  assert.equal(main(['--projects-dir', projects, '--project', 'a', '--level', 'archive', '--yes'], { log: () => {}, error: () => {} }), 0);
+  assert.equal(planProjectCleanup(dir, { level: 'archive', minAgeDays: 0 }).bytes, 0);
+  assert.equal(cleanupHint(dir), null);
+  put(path.join(projects, 'b'), '.project-mutation.lock', '{}');
+  assert.equal(cleanupHint(path.join(projects, 'b')), null);
+  assert.equal(cleanupHint(path.join(projects, 'missing')), null);
+  const broken = new Proxy(fs, { get: (target, key) => (key === 'existsSync' ? () => { throw new Error('io'); } : target[key]) });
+  assert.equal(cleanupHint(path.join(projects, 'b'), { fileSystem: broken }), null);
+});
+
+test('printCleanupHint prints one line or nothing and never throws', (t) => {
+  const projects = freshFinished(t);
+  const lines = [];
+  printCleanupHint(path.join(projects, 'a'), (line) => lines.push(line));
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^Можно освободить .+: automontage clean --projects-dir \S+ --project a --level archive --yes$/);
+  const none = [];
+  printCleanupHint(path.join(projects, 'missing'), (line) => none.push(line));
+  assert.deepEqual(none, []);
+  assert.doesNotThrow(() => printCleanupHint(path.join(projects, 'a'), () => { throw new Error('closed stdout'); }));
+});
+
+test('a final promoted from the preview gets the hint right away (no 3-day pause)', (t) => {
+  const { projectsDir } = makePultRoot(t);
+  const { projectDir, workspace, approved } = addDraftProject(projectsDir, { folder: 'promoted', approve: true, cleanPreview: true });
+  const { promoteApprovedPreview } = require('../scripts/project/promote-preview');
+  assert.equal(promoteApprovedPreview(workspace, approved.jsonPath).promoted, true);
+  put(projectDir, 'tmp/scratch.wav', 'x'.repeat(2048));
+  assert.match(cleanupHint(projectDir), /: automontage clean --projects-dir \S+ --project promoted --level archive --yes$/);
+});
+
+// Подсказка печатается после каждого пути к финалу: lesson-рендер, motion-рендер, продвижение preview.
+for (const [file, anchor] of [
+  ['scripts/build.js', 'готово по утверждённому ТЗ'],
+  ['scripts/motion/build.js', 'Motion final:'],
+  ['scripts/project/approve-brief.js', 'копия просмотренного preview'],
+]) {
+  test(`${file} prints the cleanup hint after the final`, () => {
+    const text = fs.readFileSync(path.join(__dirname, '..', ...file.split('/')), 'utf8');
+    const finalAt = text.indexOf(anchor);
+    const hintAt = text.indexOf('printCleanupHint(', finalAt);
+    assert.ok(finalAt > 0 && hintAt > finalAt, file);
+  });
+}
+
+test('approve-brief.js prints the hint line right after the promoted final', (t) => {
+  const { projectsDir } = makePultRoot(t);
+  const { projectDir, draft } = addDraftProject(projectsDir, { folder: 'cli-hint', cleanPreview: true });
+  put(projectDir, 'tmp/scratch.wav', 'x'.repeat(4096));
+  const output = execFileSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'project', 'approve-brief.js'),
+    projectDir, draft.jsonPath, '--confirm-preview-viewed'], { encoding: 'utf8' });
+  const lines = output.trim().split('\n');
+  const finalAt = lines.findIndex((line) => line.startsWith('final: '));
+  assert.ok(finalAt >= 0, output);
+  assert.match(lines.at(-1), /^Можно освободить .+: automontage clean --projects-dir \S+ --project cli-hint --level archive --yes$/);
 });

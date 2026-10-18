@@ -61,3 +61,26 @@ for (const file of ['AGENTS.md', 'skills/reel-turnkey/SKILL.md', 'skills/reel-fr
     assert.match(text, /--accept[\s\S]{0,160}без/u);
   });
 }
+
+// #113: после финала и QA агент всегда предлагает чистку этого ролика – ГБ и список файлов –
+// и удаляет только после явного «да» пользователя в чате.
+const CLEAN_OFFER = /automontage clean --project[\s\S]{0,400}только\s+после\s+явного\s+«да»/u;
+
+test('AGENTS.md offers cleanup of the finished reel in the pult section and the autonomy rules', () => {
+  const text = read('AGENTS.md');
+  const pult = text.split('## Пульт роликов')[1].split('\n## ')[0];
+  assert.match(pult, CLEAN_OFFER);
+  assert.match(pult, /ГБ и список файлов/u);
+  assert.match(pult, /[Нн]икогда не удаляй[\s\S]{0,40}без «да»/u);
+  const autonomy = text.split('## Обязательный выбор монтажа в новом чате')[1].split('\n## ')[0];
+  assert.match(autonomy, CLEAN_OFFER);
+});
+
+for (const file of ['skills/reel-turnkey/SKILL.md', 'skills/motion-reel/SKILL.md', '.agents/skills/motion-reel/SKILL.md',
+  '.codex/skills/motion-reel/SKILL.md', 'skills/ai-promo/SKILL.md']) {
+  test(`${file} offers cleanup of this reel after the final and deletes only after "да"`, () => {
+    const text = read(file);
+    assert.match(text, CLEAN_OFFER);
+    assert.match(text, /--level archive/u);
+  });
+}

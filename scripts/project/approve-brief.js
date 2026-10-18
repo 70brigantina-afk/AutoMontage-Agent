@@ -6,6 +6,7 @@ const {
   createOrOpenProject,
 } = require('./workspace');
 const { finalizeApproval } = require('./approve-final');
+const { printCleanupHint } = require('./clean');
 
 const args = process.argv.slice(2);
 const confirmPreviewViewed = args.includes('--confirm-preview-viewed');
@@ -29,6 +30,8 @@ try {
   if (final.promoted) {
     console.log(`final: ${final.finalPath} (копия просмотренного preview, без рендера)`);
     if (!final.already) console.log('final QA идёт в фоне – отчёт придёт во входящие (automontage inbox)');
+    // #113: финал готов – сколько места освободит чистка этого ролика (без удаления).
+    printCleanupHint(project.dir);
   } else {
     console.log(`финал соберёт рендер: ${final.reason}`);
   }

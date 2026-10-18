@@ -65,6 +65,8 @@ function help() {
                                       собрать ролик из лучших кусков разных дублей
   automontage clean [--level renders|archive] [--yes]
                                       отчёт, что можно удалить у готовых роликов; --yes удаляет
+  automontage clean --project <папка> [--level archive] [--yes]
+                                      то же для одного ролика сразу после финала (пауза 0 дней)
   automontage critic --project-dir <папка> --report <файл.json>
                                       проверить отчёт критика, сохранить qa/critic-NN.json|txt
                                       и показать решение: исправлять три худшие сцены или остановиться

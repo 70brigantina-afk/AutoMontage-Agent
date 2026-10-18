@@ -58,6 +58,7 @@ const { withPublicMediaLease } = require('./public-media');
 const { withRenderMediaBundle } = require('./render-media-bundle');
 const { verifyBriefBrollMedia } = require('./lesson/broll-media-files');
 const { runFinalQaSync } = require('./qa/final-qa');
+const { printCleanupHint } = require('./project/clean');
 
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : d; };
@@ -535,6 +536,8 @@ if (lessonAction === 'render') {
     }
     console.log(`\n✅ готово по утверждённому ТЗ: ${finalL}  (${prepared.props.width}x${prepared.props.height})`);
     console.log('   отправлять как ДОКУМЕНТ [ФАЙЛ:] иначе Telegram сплющит вертикаль.');
+    // #113: сразу после финала – сколько места освободит чистка этого ролика (без удаления).
+    if (buildContext.project) printCleanupHint(buildContext.project.dir);
   } finally { lessonSlot.release(); }
   process.exit(0);
 }
