@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [1.19.0] - 2026-10-18
+
 ### Добавлено
 
 - Лист ключевых моментов: `automontage layer sheet --mode moments` режет кадры preview по
