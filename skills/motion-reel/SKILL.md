@@ -228,6 +228,11 @@ automontage motion --project-dir projects/<id> --brief brief/vNN-approved.motion
 
 Если `approve-brief.js` напечатал `final: …`, вторую команду не выполняй: финал уже готов.
 
+После финала и QA всегда предложи чистку этого ролика: `automontage clean --project <id>
+--level archive` без `--yes` – покажи ГБ и список файлов (строка «Можно освободить N ГБ: …»
+после финала – та же подсказка). Удаляй командой с `--yes` только после явного «да» пользователя
+в чате; без «да» ничего не удаляй.
+
 Approval связывает hashes draft, preview и narration. Только текущая зарегистрированная
 approved-копия может попасть в `renders/` и `final/`; receipt нельзя составлять вручную.
 Изменение script/аудио/таймингов/темы/сцен требует нового draft, preview и утверждения.

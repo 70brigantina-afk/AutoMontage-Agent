@@ -253,6 +253,43 @@ function planCleanup(projectsDir, options = {}) {
   return { projects, bytes: projects.reduce((sum, item) => sum + item.bytes, 0) };
 }
 
+const DEFAULT_PROJECTS_DIR = path.join(__dirname, '..', '..', 'projects');
+
+// Слово для копирования в shell: простое имя как есть, иначе в одинарных кавычках.
+function shellWord(value) {
+  return /^[\w./@-]+$/u.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+// Чистка одного ролика (--project): план того же вида, что у planCleanup, но из одной папки.
+function planSingleProject(projectDir, options = {}) {
+  const project = safePlan(projectDir, options);
+  return { projects: [project], bytes: project.bytes };
+}
+
+// Подсказка сразу после финала (#113): сколько освободит archive-чистка этого ролика и точная команда.
+// Ничего не освобождается, ролик не готов или подсчёт упал – null: сборка финала от этого не страдает.
+function cleanupHint(projectDir, { now = new Date(), fileSystem = fs } = {}) {
+  try {
+    const plan = planProjectCleanup(projectDir, { level: 'archive', minAgeDays: 0, now, fileSystem });
+    if (plan.status !== 'eligible' || plan.bytes <= 0) return null;
+    // Ролик вне projects/ движка: команда без --projects-dir искала бы его не там.
+    const parent = path.resolve(path.dirname(projectDir));
+    const where = parent === path.resolve(DEFAULT_PROJECTS_DIR) ? '' : ` --projects-dir ${shellWord(parent)}`;
+    return `Можно освободить ${formatSize(plan.bytes)}: automontage clean${where} --project ${shellWord(path.basename(projectDir))} --level archive --yes`;
+  } catch {
+    return null;
+  }
+}
+
+function printCleanupHint(projectDir, log = console.log) {
+  try {
+    const hint = cleanupHint(projectDir);
+    if (hint) log(hint);
+  } catch {
+    // Подсказка не обязательна: финал уже собран.
+  }
+}
+
 function insideProject(projectDir, file, fileSystem) {
   const root = fileSystem.realpathSync(projectDir);
   const parent = fileSystem.realpathSync(path.dirname(file));
@@ -310,8 +347,16 @@ function formatSize(bytes) {
   return gb >= 1 ? `${gb.toFixed(1)} ГБ` : `${(bytes / 1024 ** 2).toFixed(1)} МБ`;
 }
 
+// Имя папки ролика внутри projects/: «<папка>» или «projects/<папка>», как его печатают входящие.
+function projectFolder(value) {
+  const name = value.replaceAll('\\', '/').replace(/\/+$/u, '').replace(/^projects\//u, '');
+  if (!name || name.includes('/') || name.startsWith('.')) throw new Error('--project – имя папки ролика внутри projects/');
+  return name;
+}
+
 function parseCleanOptions(argv) {
-  const options = { projectsDir: path.join(__dirname, '..', '..', 'projects'), level: 'renders', minAgeDays: 3, yes: false };
+  const options = { projectsDir: DEFAULT_PROJECTS_DIR, level: 'renders', minAgeDays: 3, project: null, yes: false };
+  let explicitAge = false;
   for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index];
     if (key === '--yes') {
@@ -323,32 +368,49 @@ function parseCleanOptions(argv) {
     index += 1;
     if (key === '--projects-dir') options.projectsDir = path.resolve(value);
     else if (key === '--level') options.level = value;
+    else if (key === '--project') options.project = projectFolder(value);
     else if (key === '--min-age-days') {
+      explicitAge = true;
       options.minAgeDays = Number(value);
       if (!Number.isInteger(options.minAgeDays) || options.minAgeDays < 0) throw new Error('--min-age-days – целое число дней ≥ 0');
     } else throw new Error(`неизвестная опция clean: ${key}`);
   }
   if (!CLEAN_LEVELS.includes(options.level)) throw new Error(`неизвестный уровень "${options.level}": используй renders или archive`);
+  // Один названный ролик чистится сразу после финала; общий запуск ждёт 3 дня.
+  if (options.project && !explicitAge) options.minAgeDays = 0;
   return options;
 }
 
 function main(argv = process.argv.slice(2), { now = new Date(), log = console.log, error = console.error } = {}) {
   try {
     const options = parseCleanOptions(argv);
-    const plan = planCleanup(options.projectsDir, { level: options.level, minAgeDays: options.minAgeDays, now });
-    log(`Чистка готовых роликов (уровень ${options.level}) – ${options.projectsDir}`);
+    const planOptions = { level: options.level, minAgeDays: options.minAgeDays, now };
+    let plan;
+    if (options.project) {
+      const projectDir = path.join(options.projectsDir, options.project);
+      if (!fs.lstatSync(projectDir, { throwIfNoEntry: false })?.isDirectory()) {
+        throw new Error(`--project: папка ролика ${options.project} не найдена в ${options.projectsDir}`);
+      }
+      plan = planSingleProject(projectDir, planOptions);
+      log(`Чистка ролика ${options.project} (уровень ${options.level})`);
+    } else {
+      plan = planCleanup(options.projectsDir, planOptions);
+      log(`Чистка готовых роликов (уровень ${options.level}) – ${options.projectsDir}`);
+    }
     for (const project of plan.projects) {
       const name = path.basename(project.projectDir);
       log(project.status === 'eligible'
         ? `  ${name}: ${formatSize(project.bytes)} (${project.files.length} файл.)`
         : `  ${name}: пропущен – ${project.reason}`);
+      // Для одного ролика – полный список: его агент показывает пользователю перед «да».
+      if (options.project) for (const file of project.files) log(`    ${file.path} – ${formatSize(file.bytes)}`);
     }
     log(`Можно освободить: ${formatSize(plan.bytes)}`);
     if (!options.yes) {
       log('Чтобы удалить, повторите с --yes. Финал, ТЗ, транскрипты, исходники сцен, оригинал и активная ревизия исходника и материалы текущего ТЗ не удаляются.');
       return 0;
     }
-    const result = applyCleanup(plan, { level: options.level, minAgeDays: options.minAgeDays, now });
+    const result = applyCleanup(plan, planOptions);
     for (const item of result.skipped) log(`  ${path.basename(item.projectDir)}: пропущен при удалении – ${item.reason}`);
     for (const item of result.failed) error(`  не удалён ${item.path}: ${item.code}`);
     log(`Удалено ${result.removedFiles} файлов, освобождено ${formatSize(result.freedBytes)}`);
@@ -361,4 +423,6 @@ function main(argv = process.argv.slice(2), { now = new Date(), log = console.lo
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = { CLEAN_LEVELS, applyCleanup, main, planCleanup, planProjectCleanup };
+module.exports = {
+  CLEAN_LEVELS, applyCleanup, cleanupHint, formatSize, main, planCleanup, planProjectCleanup, printCleanupHint,
+};
