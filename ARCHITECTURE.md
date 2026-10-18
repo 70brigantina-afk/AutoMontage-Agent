@@ -368,7 +368,11 @@ directory fsync следует общей платформенной полит�
 `prepareMotionPreview`/`prepareMotionRender` связывают brief с `manifest.source.localPath`,
 не создают `faceSrc`, проверяют тему `motion-neutral` и сохраняют глобальный таймкод озвучки.
 Общий `render-media-bundle` различает роли audio/image/video: narration, scene media и музыка
-копируются с no-follow в изолированный каталог. Motion media и music имеют обязательные hashes;
+копируются с no-follow в изолированный каталог. Жизнь lease – одна реализация
+(`withLessonMediaBundle`): проверка до операции, проверка после, уборка всегда; синхронные
+`withPreviewMediaBundle`/`withRenderMediaBundle` и асинхронный `withPreviewMediaBundleAsync` (кадры
+критика через `renderStill`) отличаются только тем, ждёт ли ядро Promise операции.
+Motion media и music имеют обязательные hashes;
 все ссылки относительны workspace. Music использует существующий finish/ducking pipeline.
 Перед копированием motion video ffprobe читает тот же закреплённый дескриптор, который затем
 хешируется. Каждый scene, включая повторное использование файла, проверяет наличие пригодного
@@ -1081,9 +1085,18 @@ flowchart TD
   предупреждает: qa-отчёт не пишет, код 0.
 - **Ключевые моменты и критик.** `scripts/qa/key-moments.js` выводит моменты preview (событие –
   начало элемента + 0,3 с, удержание – середина текста, слияние ближе 0,15 с, не больше 48; без
-  манифеста и сцен – 16 равномерных). `layer sheet --mode moments` режет по ним кадры для критика
-  (720 px), лист 4 колонки с рамкой safe-зоны и телефонный лист (360 px) в `qa/moments-<sha8>*` и
-  пишет индекс `qa/moments-<sha8>.json`. `scripts/qa/critic.js` (`automontage critic`) проверяет
+  манифеста и сцен – 16 равномерных). `layer sheet --mode moments` берёт по ним кадры для критика
+  (720 px по длинной стороне) и общей плиткой `tileMomentFrames` собирает лист 4 колонки с рамкой
+  safe-зоны и телефонный лист (360 px). Источник `--source stills` (по умолчанию) –
+  `scripts/qa/moment-stills.js`: без рендера видео рисует кадры прямо из композиции через
+  `renderStill` (один бандл и один браузер, jpeg 85, тяжёлый слот `critic stills <папка>`). Цель –
+  слой `motion-vNN` (`--layer` или последний; композиция и public слоя, моменты из
+  `out/manifest.json`, который обязан нести `srcSha256` – отпечаток `src/`, записанный `layer
+  check`; нет манифеста или src/ менялась – код 2 «сначала `automontage layer check`») или
+  motion-reel (`MotionReel`, props черновика ТЗ, медиа через `withPreviewMediaBundleAsync`); урок без
+  слоя – код 2 «критик только для моушн-роликов». Файлы – `qa/moments-stills-<sha8>*`, индекс с
+  `source: 'stills'` и `inputsSha256` (план или ТЗ, props, исходник). `--source preview` – кадры
+  готового preview в `qa/moments-<sha8>*`, индекс с `source: 'preview'` и `previewSha256`. `scripts/qa/critic.js` (`automontage critic`) проверяет
   JSON-отчёт агента-критика по `schema/critic-report.schema.json`, отклоняет отчёт к другому preview
   (код 2), сохраняет `qa/critic-NN.json|txt` и печатает решение: исправлять три худшие сцены или
   остановиться (цель 9 без сцен ниже 7, третий круг, рост меньше 0,3). Задание критику –
@@ -1215,7 +1228,7 @@ Remotion `OffthreadVideo`. `trimBefore = round(trimStartSec × fps)`, а дли�
 | Motion-kit (детали слоя) | `src/motion-kit/*` (чистые `core.js` и React `index.js`), `templates/motion-layer/` (стартовые файлы слоя), `scripts/remotion-webpack.js` (alias `@automontage/motion-kit`) |
 | Kit в Node | `scripts/motion-kit-node.js`: `loadKitCore`, `buildLayerManifest`, граница `plan.js` `findPlanViolation` (esbuild `buildSync` + metafile) |
 | Команды слоя | `scripts/layer/cli.js` и `new`, `words`, `check`, `render`, `import`, `brief`, `stock`, `sheet`; общие части `common.js`, `registry.js`, `sfx-library.js`; машинная очередь `scripts/heavy-queue.js`; `remotionLayerRenderCommand` в `scripts/build-commands.js` |
-| QA-гейты | `scripts/qa/profiles.js`, `report.js`, `safe-rect.js`, `timeline-gates.js` (G1–G5, G9–G11), `audio.js`, `media-gates.js` (G6, G7), `mix-gates.js` (G8), `preview-gates.js` (барьер L + G8), `empty-frame-gate.js` (G12), `final-transcript-gates.js` (F1–F5), `cover-frame-gate.js` (G13), `text-layout-gates.js` (G14, G15), `text-boxes.js` (рамки надписей с кадров финала), `final-qa.js` (раннер финала) |
+| QA-гейты | `scripts/qa/profiles.js`, `report.js`, `safe-rect.js`, `timeline-gates.js` (G1–G5, G9–G11), `audio.js`, `media-gates.js` (G6, G7), `mix-gates.js` (G8), `preview-gates.js` (барьер L + G8), `empty-frame-gate.js` (G12), `key-moments.js` и `moment-stills.js` (моменты и кадры критика из композиции), `critic.js` (отчёт критика), `final-transcript-gates.js` (F1–F5), `cover-frame-gate.js` (G13), `text-layout-gates.js` (G14, G15), `text-boxes.js` (рамки надписей с кадров финала), `final-qa.js` (раннер финала) |
 
 Длинный рендер хранит части в `out/.chunks/<job-sha256>/`. Cache descriptor v2 включает
 composition, канонизированные props, identities source/audio, диапазоны и Remotion options,

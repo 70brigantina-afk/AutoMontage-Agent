@@ -9,6 +9,7 @@ const { buildLayerManifest } = require('../scripts/motion-kit-node');
 const { hashFile } = require('../scripts/pult/files');
 const newLayer = require('../scripts/layer/new');
 const check = require('../scripts/layer/check');
+const { layerSrcSha256 } = require('../scripts/layer/common');
 
 const hasFfmpeg = toolAvailable('ffmpeg') && toolAvailable('ffprobe');
 const cli = path.resolve(__dirname, '../scripts/cli.js');
@@ -45,8 +46,11 @@ test('the fresh template passes every stop gate and writes manifest and report',
   assert.equal(await runCheck({}, deps), 0);
   const manifestFile = path.join(layerDir, 'out', 'manifest.json');
   assert.ok(fs.existsSync(manifestFile));
-  // Манифест на диске – ровно то, что собрал kit из plan.js, записанный целиком (temp + rename).
-  assert.deepEqual(JSON.parse(fs.readFileSync(manifestFile, 'utf8')), JSON.parse(JSON.stringify(buildLayerManifest(layerDir))));
+  // Манифест на диске – ровно то, что собрал kit из plan.js, записанный целиком (temp + rename), плюс
+  // отпечаток src/ (srcSha256), по которому кадры критика узнают устаревший манифест.
+  const written = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+  assert.equal(written.srcSha256, layerSrcSha256(layerDir));
+  assert.deepEqual(written, { ...JSON.parse(JSON.stringify(buildLayerManifest(layerDir))), srcSha256: layerSrcSha256(layerDir) });
   assert.deepEqual(fs.readdirSync(path.join(layerDir, 'out')), ['manifest.json']);
   const json = report();
   assert.equal(json.kind, 'layer-check');

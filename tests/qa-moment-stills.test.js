@@ -10,11 +10,12 @@ const { readProjectManifest } = require('../scripts/project/workspace');
 const { hashFile } = require('../scripts/pult/files');
 const { inputsSha256, renderMomentStills, resolveStillsTarget } = require('../scripts/qa/moment-stills');
 const sheet = require('../scripts/layer/sheet');
+const { layerSrcSha256 } = require('../scripts/layer/common');
 
 const hasFfmpeg = toolAvailable('ffmpeg') && toolAvailable('ffprobe');
 
 // Слой без настоящего layer new: layer.json, план, точка входа и (по желанию) манифест layer check.
-function fakeLayer(projectDir, { name = 'motion-v01', manifest = true, plan = 'export const plan = { texts: [] };\n' } = {}) {
+function fakeLayer(projectDir, { name = 'motion-v01', manifest = true, srcSha256 = true, plan = 'export const plan = { texts: [] };\n' } = {}) {
   const project = readProjectManifest(projectDir);
   const sourcePath = path.join(projectDir, project.source.localPath);
   const layerDir = path.join(projectDir, name);
@@ -28,7 +29,8 @@ function fakeLayer(projectDir, { name = 'motion-v01', manifest = true, plan = 'e
   }));
   if (manifest) {
     fs.mkdirSync(path.join(layerDir, 'out'), { recursive: true });
-    fs.writeFileSync(path.join(layerDir, 'out', 'manifest.json'), JSON.stringify(manifestFixture({ seconds: 4 })));
+    const stamp = srcSha256 ? { srcSha256: layerSrcSha256(layerDir) } : {};
+    fs.writeFileSync(path.join(layerDir, 'out', 'manifest.json'), JSON.stringify({ ...manifestFixture({ seconds: 4 }), ...stamp }));
   }
   return layerDir;
 }
@@ -120,14 +122,28 @@ test('renderMomentStills: ошибка renderStill – браузер закры
   assert.deepEqual(fs.readdirSync(outDir), [], 'ни временной папки, ни половины кадров');
 });
 
-test('renderMomentStills: Chrome не запустился – понятная ошибка, слот освобождён, временная папка удалена', async (t) => {
+test('renderMomentStills: Chrome не запустился – понятная ошибка, слот освобождён, временные папки удалены', async (t) => {
   const root = tmp(t);
   const outDir = path.join(root, 'qa');
+  const tmpRoot = path.join(root, 'tmp');
+  fs.mkdirSync(tmpRoot);
   const { calls, deps } = stubs({ failBrowser: true });
+  deps.tmpdir = () => tmpRoot;
+  let bundleOut = null;
+  deps.bundle = async (options) => { bundleOut = options.outDir; return 'http://bundle'; };
   await assert.rejects(renderMomentStills({ target: layerTarget(root), moments, outDir, name: 'moments-stills-x', log: () => {} }, deps),
     (error) => /Chrome/u.test(error.message) && /Failed to launch/u.test(error.message));
   assert.equal(calls.released, 1);
   assert.deepEqual(fs.readdirSync(outDir), []);
+  assert.ok(bundleOut && bundleOut.startsWith(path.join(tmpRoot, 'automontage-critic-stills-')), 'бандл во временной папке из deps.tmpdir');
+  assert.deepEqual(fs.readdirSync(tmpRoot), [], 'временная папка бандла удалена');
+});
+
+test('renderMomentStills: переданный sha идёт в индекс как есть', async (t) => {
+  const root = tmp(t);
+  const { deps } = stubs();
+  const result = await renderMomentStills({ target: layerTarget(root), moments: moments.slice(0, 1), outDir: path.join(root, 'qa'), name: 'n', sha: 'd'.repeat(64), log: () => {} }, deps);
+  assert.equal(JSON.parse(fs.readFileSync(result.indexPath, 'utf8')).inputsSha256, 'd'.repeat(64));
 });
 
 test('renderMomentStills: медиа motion-reel берутся из lease, а не из props ТЗ', async (t) => {
@@ -163,6 +179,32 @@ test('resolveStillsTarget: слой без out/manifest.json – «сначал�
   fakeLayer(projectDir, { manifest: false });
   assert.throws(() => resolveStillsTarget(projectDir, readProjectManifest(projectDir)),
     (error) => error.message.includes('сначала `automontage layer check`') && error.code === 'CRITIC_STILLS_REFUSED');
+});
+
+test('resolveStillsTarget: src/ слоя изменилась после layer check – манифест устарел, «сначала automontage layer check»', { skip: !hasFfmpeg }, (t) => {
+  const { projectDir } = makeLayerProject(t, { seconds: 2 });
+  const layerDir = fakeLayer(projectDir);
+  assert.equal(resolveStillsTarget(projectDir, readProjectManifest(projectDir)).kind, 'layer');
+  fs.writeFileSync(path.join(layerDir, 'src', 'plan.js'), 'export const plan = { texts: [1] };\n');
+  assert.throws(() => resolveStillsTarget(projectDir, readProjectManifest(projectDir)),
+    (error) => error.message.includes('устарел') && error.message.includes('сначала `automontage layer check`') && error.code === 'CRITIC_STILLS_REFUSED');
+});
+
+test('resolveStillsTarget: манифест без srcSha256 (старый layer check) – отказ с подсказкой', { skip: !hasFfmpeg }, (t) => {
+  const { projectDir } = makeLayerProject(t, { seconds: 2 });
+  fakeLayer(projectDir, { srcSha256: false });
+  assert.throws(() => resolveStillsTarget(projectDir, readProjectManifest(projectDir)),
+    (error) => error.message.includes('сначала `automontage layer check`') && error.code === 'CRITIC_STILLS_REFUSED');
+});
+
+test('layerSrcSha256: любой файл src/ (и вложенный) меняет отпечаток', (t) => {
+  const layerDir = tmp(t);
+  fs.mkdirSync(path.join(layerDir, 'src', 'parts'), { recursive: true });
+  fs.writeFileSync(path.join(layerDir, 'src', 'plan.js'), 'a');
+  const before = layerSrcSha256(layerDir);
+  assert.equal(layerSrcSha256(layerDir), before);
+  fs.writeFileSync(path.join(layerDir, 'src', 'parts', 'X.jsx'), 'b');
+  assert.notEqual(layerSrcSha256(layerDir), before);
 });
 
 test('resolveStillsTarget: урок без слоя – «критик только для моушн-роликов»', { skip: !hasFfmpeg }, (t) => {
@@ -235,6 +277,7 @@ test('layer sheet --source stills: моменты из манифеста сло
   assert.equal(seen[0].target.kind, 'layer');
   assert.ok(seen[0].moments.length > 0);
   assert.match(seen[0].name, /^moments-stills-[a-f0-9]{8}$/u);
+  assert.equal(seen[0].name, `moments-stills-${seen[0].sha.slice(0, 8)}`, 'имя и индекс – от одного sha');
   assert.ok(lines.some((l) => l.includes('i.json')));
 });
 

@@ -1269,29 +1269,46 @@ function prepareRenderMediaBundle(options) {
   });
 }
 
-function withLessonMediaBundle(options, operation, policy) {
+// Единственная реализация жизни lease: ASSERT_BUNDLE_CURRENT до операции, ASSERT_BUNDLE_AFTER_CALLBACK
+// после, cleanup всегда (сбой cleanup после сбоя операции – диагностика к исходной ошибке). С
+// awaitOperation: true операция может вернуть Promise, и lease живёт до его завершения.
+function withLessonMediaBundle(options, operation, policy, { awaitOperation = false } = {}) {
   if (typeof operation !== 'function') fail('operation must be a function');
   const lease = prepareLessonMediaBundle(options, policy);
   let operationError = null;
   let operationFailed = false;
-  try {
-    lease[ASSERT_BUNDLE_CURRENT]();
-    const result = operation(lease);
-    lease[ASSERT_BUNDLE_AFTER_CALLBACK]();
-    return result;
-  } catch (error) {
+  let deferred = false;
+  const failWith = (error) => {
     operationError = error;
     operationFailed = true;
     throw error;
-  } finally {
+  };
+  const cleanup = () => {
     try {
       lease.cleanup();
     } catch (cleanupError) {
       if (!operationFailed) throw cleanupError;
       attachCleanupDiagnostic(operationError, cleanupError);
     }
+  };
+  const afterCallback = (result) => {
+    lease[ASSERT_BUNDLE_AFTER_CALLBACK]();
+    return result;
+  };
+  try {
+    lease[ASSERT_BUNDLE_CURRENT]();
+    const result = operation(lease);
+    if (!awaitOperation) return afterCallback(result);
+    deferred = true;
+    return Promise.resolve(result).then(afterCallback).catch(failWith).finally(cleanup);
+  } catch (error) {
+    return failWith(error);
+  } finally {
+    if (!deferred) cleanup();
   }
 }
+
+const PREVIEW_POLICY = Object.freeze({ briefKey: 'previewBrief', purpose: 'preview', requireStatus: 'draft' });
 
 function withRenderMediaBundle(options, operation) {
   if (arguments.length > 2) fail('pre-render prepare operation is unsupported');
@@ -1304,37 +1321,14 @@ function withRenderMediaBundle(options, operation) {
 
 function withPreviewMediaBundle(options, operation) {
   if (arguments.length > 2) fail('pre-preview prepare operation is unsupported');
-  return withLessonMediaBundle(options, operation, {
-    briefKey: 'previewBrief',
-    purpose: 'preview',
-    requireStatus: 'draft',
-  });
+  return withLessonMediaBundle(options, operation, PREVIEW_POLICY);
 }
 
 // Тот же lease черновика, что у withPreviewMediaBundle, но операция асинхронная: кадры критика
 // (scripts/qa/moment-stills.js) рисует renderStill в Promise, и lease обязан жить до его конца.
 async function withPreviewMediaBundleAsync(options, operation) {
-  if (typeof operation !== 'function') fail('operation must be a function');
-  const lease = prepareLessonMediaBundle(options, { briefKey: 'previewBrief', purpose: 'preview', requireStatus: 'draft' });
-  let operationError = null;
-  let operationFailed = false;
-  try {
-    lease[ASSERT_BUNDLE_CURRENT]();
-    const result = await operation(lease);
-    lease[ASSERT_BUNDLE_AFTER_CALLBACK]();
-    return result;
-  } catch (error) {
-    operationError = error;
-    operationFailed = true;
-    throw error;
-  } finally {
-    try {
-      lease.cleanup();
-    } catch (cleanupError) {
-      if (!operationFailed) throw cleanupError;
-      attachCleanupDiagnostic(operationError, cleanupError);
-    }
-  }
+  if (arguments.length > 2) fail('pre-preview prepare operation is unsupported');
+  return withLessonMediaBundle(options, operation, PREVIEW_POLICY, { awaitOperation: true });
 }
 
 function verifyMotionBriefMedia({ root, workspace, brief, fileSystem = fs }) {

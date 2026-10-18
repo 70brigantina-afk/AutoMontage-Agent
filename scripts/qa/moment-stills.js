@@ -16,7 +16,7 @@ const { assertCompositionId } = require('../build-commands');
 const { acquireHeavySlotSync, heavyQueueConfig } = require('../heavy-queue');
 const { hashFile } = require('../pult/files');
 const { resolveProjectPath } = require('../project/workspace');
-const { LAYER_NAME, assertLayerSource, relative, writeJson } = require('../layer/common');
+const { LAYER_NAME, assertLayerSource, layerSrcSha256, relative, writeJson } = require('../layer/common');
 const { emptyFrameGate } = require('./empty-frame-gate');
 
 const CRITIC_LONG_SIDE = 720;
@@ -69,6 +69,11 @@ function layerTarget(projectDir, manifest, layerName) {
     throw new Error('layer.json: fps, width, height и durationInFrames должны быть числами больше 0');
   }
   const { manifest: layerManifest } = readCheckedManifest(projectDir, layerDir);
+  // Манифест от другого src/ (правка plan.js, words.js или компонентов после layer check, или старый
+  // манифест без отпечатка) – моменты и проверенный план разошлись бы с тем, что нарисует композиция.
+  if (layerManifest?.srcSha256 !== layerSrcSha256(layerDir)) {
+    throw refuse(`out/manifest.json слоя ${layerName} устарел: src/ менялась после проверки – ${check}`);
+  }
   return {
     kind: 'layer', projectDir, layerName, entry: path.join(layerDir, 'src', 'index.jsx'), compositionId: layer.composition,
     inputProps: {}, publicDir: path.join(layerDir, 'public'), width, height, fps, durationInFrames, durationSec: durationInFrames / fps,
@@ -129,22 +134,24 @@ function inputsSha256(target, readFile = fs.readFileSync) {
 
 // deps: bundle/openBrowser/selectComposition/renderStill – Remotion (по умолчанию как у text-boxes),
 // acquireSlot – занятие слота очереди (контракт acquireHeavySlotSync), tile – плитка листов,
-// edgeShare(file) – доля краёв кадра для G12. Тесты подменяют их без Chrome и ffmpeg.
-async function renderMomentStills({ target, moments, outDir, name, log = console.warn }, deps = {}) {
+// edgeShare(file) – доля краёв кадра для G12, tmpdir – где создать временную папку бандла. Тесты
+// подменяют их без Chrome и ffmpeg. sha – уже посчитанный inputsSha256(target) (из него вызывающий
+// составил имя), чтобы имя и индекс не разошлись; без него считается здесь.
+async function renderMomentStills({ target, moments, outDir, name, sha = inputsSha256(target), log = console.warn }, deps = {}) {
   const sheet = require('../layer/sheet');
   const remotion = ['bundle', 'openBrowser', 'selectComposition', 'renderStill'].every((key) => deps[key])
     ? deps : { ...require('./text-boxes').defaultDeps(), ...deps };
   const acquireSlot = deps.acquireSlot || acquireHeavySlotSync;
   const tile = deps.tile || sheet.tileMomentFrames;
   const edgeShare = deps.edgeShare || ((file) => sheet.frameEdgeShare(file, 0));
-  const sha = inputsSha256(target);
+  const tmpdir = deps.tmpdir || os.tmpdir;
   fs.mkdirSync(outDir, { recursive: true });
   const work = path.join(outDir, `${name}.frames-${process.pid}-${crypto.randomBytes(4).toString('hex')}`);
   const slot = acquireSlot({ label: `critic stills ${path.basename(target.projectDir)}`, config: heavyQueueConfig(), log });
   let bundleDir = null;
   try {
     fs.mkdirSync(path.join(work, 'frames'), { recursive: true });
-    bundleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'automontage-critic-stills-'));
+    bundleDir = fs.mkdtempSync(path.join(tmpdir(), 'automontage-critic-stills-'));
     const files = [];
     const draw = async ({ inputProps, publicDir }) => {
       let browser = null;
@@ -196,9 +203,13 @@ async function renderMomentStills({ target, moments, outDir, name, log = console
     log(`кадров для критика: ${entries.length}`);
     return { framesDir, sheetPath, phonePath, indexPath, inputsSha256: sha, gate: emptyFrameGate(samples) };
   } finally {
-    fs.rmSync(work, { recursive: true, force: true });
-    if (bundleDir) fs.rmSync(bundleDir, { recursive: true, force: true });
+    // Слот – первым: сбой уборки не должен держать очередь тяжёлых задач.
     slot.release();
+    try {
+      fs.rmSync(work, { recursive: true, force: true });
+    } finally {
+      if (bundleDir) fs.rmSync(bundleDir, { recursive: true, force: true });
+    }
   }
 }
 

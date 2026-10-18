@@ -306,8 +306,9 @@ async function runStills({ projectDir, manifest, options, deps, log, warn }) {
   const moments = target.kind === 'layer'
     ? keyMoments({ manifest: target.manifest, durationSec: target.durationSec })
     : keyMoments({ brief: target.brief, durationSec: target.durationSec });
+  const sha = inputsSha256(target);
   const result = await (deps.renderStillsImpl || renderMomentStills)({
-    target, moments, outDir: projectQaDir(projectDir, { create: true }), name: `moments-stills-${inputsSha256(target).slice(0, 8)}`, log: warn,
+    target, moments, outDir: projectQaDir(projectDir, { create: true }), name: `moments-stills-${sha.slice(0, 8)}`, sha, log: warn,
   });
   log(`Лист моментов: ${result.sheetPath}`);
   log(`Лист для телефона: ${result.phonePath}`);
@@ -319,7 +320,8 @@ async function runStills({ projectDir, manifest, options, deps, log, warn }) {
 
 async function run(options, deps = {}) {
   const log = deps.log || console.log;
-  const warn = deps.warn || console.error;
+  // Один канал предупреждений на всю команду (stderr): отказы, ⚠️ ffmpeg и прогресс кадров.
+  const warn = deps.warn || console.warn;
   const mode = options.mode === undefined ? 'even' : options.mode;
   if (!MODES.includes(mode)) {
     warn(`❌ неизвестный --mode «${mode}»: допустимо even (равномерный контакт-лист, по умолчанию) или moments (ключевые моменты)`);
@@ -339,7 +341,7 @@ async function run(options, deps = {}) {
     return 2;
   }
   const { projectDir, manifest } = projectFrom(options);
-  if (mode === 'moments' && source === 'stills') return runStills({ projectDir, manifest, options, deps, log, warn: deps.warn || console.warn });
+  if (mode === 'moments' && source === 'stills') return runStills({ projectDir, manifest, options, deps, log, warn });
   const current = manifest.currentPreview;
   if (!current) throw new Error('в проекте нет текущего preview – сначала соберите preview');
   const videoPath = resolveProjectPath(projectDir, current.filePath, { label: 'currentPreview.filePath', mustExist: true, type: 'file' });
@@ -347,7 +349,7 @@ async function run(options, deps = {}) {
   // звук preview длиннее видео на десятые доли секунды, длительность контейнера завысила бы конец
   // ролика, и последний семпл или полоска правки просили бы кадр, которого в видео уже нет.
   const probe = probeMediaPath(videoPath, { stage: 'layer sheet probe' });
-  if (mode === 'moments') return runMoments({ projectDir, current, videoPath, probe, log, warn: deps.warn || console.warn });
+  if (mode === 'moments') return runMoments({ projectDir, current, videoPath, probe, log, warn });
   // Правки пульта пишут timeSec как currentTime плеера, то есть уже в секундах ОТ НАЧАЛА того самого
   // файла, что играл браузер (scripts/pult/status.js: video.path === preview.filePath) – сдвигать на
   // currentPreview.fromSec не нужно и неверно для preview-фрагмента. Комментарий к другому видео,
@@ -363,7 +365,7 @@ async function run(options, deps = {}) {
     .map((comment) => ({ id: comment.id, timeSec: comment.timeSec }));
   const result = buildSheet({
     videoPath, width: probe.width, height: probe.height, duration: probe.durationSec, fps: probe.fps,
-    outDir: projectQaDir(projectDir, { create: true }), name: `sheet-${current.sha256.slice(0, 8)}`, comments, log: deps.warn || console.warn,
+    outDir: projectQaDir(projectDir, { create: true }), name: `sheet-${current.sha256.slice(0, 8)}`, comments, log: warn,
   });
   log(`Контакт-лист: ${result.sheetPath}`);
   result.commentPaths.forEach((p) => log(`Кадры правки: ${p}`));
