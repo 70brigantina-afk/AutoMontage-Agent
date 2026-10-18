@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync, spawn } = require('node:child_process');
@@ -11,6 +12,7 @@ const {
   readProjectManifest,
 } = require('../scripts/project/workspace');
 const { startReviewServer } = require('../scripts/review/server');
+const { finalizeApproval } = require('../scripts/project/approve-final');
 const { resolveRemotionCommand } = require('../scripts/env');
 const ROOT = path.resolve(__dirname, '..');
 // Ждём само preview-задание, а не косвенный признак в интерфейсе: сбой виден сразу и с причиной.
@@ -176,12 +178,19 @@ test(
       });
       return child;
     };
+    const qaJobs = [];
     const session = await startReviewServer({
       root: ROOT,
       projectDir: workspace.dir,
       editable: true,
       open: false,
       previewSpawnImpl,
+      // Настоящее продвижение preview в финал; фоновый final QA только записываем, чтобы он не занял
+      // тяжёлый слот перед build.js ниже.
+      finalizeApprovalImpl: (current, approvedPath, options) => finalizeApproval(current, approvedPath, {
+        ...options,
+        startQa: (job) => { qaJobs.push(job); return { status: 'queued' }; },
+      }),
       brollProvider: {
         search: async () => ({ candidates: [candidate], nextPage: null }),
       },
@@ -344,7 +353,7 @@ test(
     await page.getByLabel('Я посмотрел полный preview').check();
     await page.getByRole('button', { name: 'Утвердить', exact: true }).click();
     await expect(
-      page.getByText('Утверждено. Финальный рендер запускается отдельно.'),
+      page.getByText('Утверждено. Финал готов – можно забирать; проверка финала идёт в фоне.'),
     ).toBeVisible();
     await expect(page.locator('[data-preview-kind]')).toHaveText(
       'ПОЛНЫЙ РОЛИК',
@@ -355,7 +364,16 @@ test(
     });
     assert.deepEqual(errors, []);
     const approvedManifest = readProjectManifest(workspace.dir);
-    assert.equal(approvedManifest.renders.length, 0);
+    // D-051: утверждение копирует просмотренный чистый полный preview в финал, без рендера.
+    assert.equal(approvedManifest.renders.length, 1);
+    assert.equal(approvedManifest.renders[0].source, 'preview');
+    assert.equal(approvedManifest.renders[0].briefPath, approvedManifest.currentBrief);
+    assert.equal(approvedManifest.renders[0].sha256, approvedManifest.currentPreview.sha256);
+    assert.deepEqual(qaJobs.map((job) => job.renderDir), [approvedManifest.renders[0].dir]);
+    assert.equal(
+      crypto.createHash('sha256').update(fs.readFileSync(path.join(workspace.dir, approvedManifest.final))).digest('hex'),
+      approvedManifest.currentPreview.sha256,
+    );
     const approved = JSON.parse(
       fs.readFileSync(path.join(workspace.dir, approvedManifest.currentBrief)),
     );

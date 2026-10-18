@@ -123,7 +123,8 @@ const NO_RENDER_HINT = 'нет данных рендера – проверка 
 async function textLayoutCheck(ctx) {
   const { textLayoutGates } = require('./text-layout-gates');
   const render = ctx.render;
-  if (!render) return textLayoutGates({ samples: null, error: NO_RENDER_HINT });
+  // skipTextReason – почему данных рендера нет (фоновая проверка продвинутого финала, D-051).
+  if (!render) return textLayoutGates({ samples: null, error: ctx.skipTextReason || NO_RENDER_HINT });
   const deps = ctx.deps || {};
   try {
     const { collectTextBoxes, pickTextFrames } = require('./text-boxes');
@@ -148,7 +149,7 @@ function relativeInput(baseDir, file) {
 }
 
 async function runFinalQa({
-  projectDir = null, finalPath, hasMusic = false, model = DEFAULT_MODEL, render = null, write = true, now = new Date(), checks = FINAL_CHECKS,
+  projectDir = null, finalPath, hasMusic = false, model = DEFAULT_MODEL, render = null, skipTextReason = null, write = true, now = new Date(), checks = FINAL_CHECKS,
 } = {}, deps = {}) {
   if (typeof finalPath !== 'string' || !finalPath) throw new Error('не указан путь к финалу');
   const dir = projectDir ? path.resolve(projectDir) : null;
@@ -172,7 +173,7 @@ async function runFinalQa({
   if (!fs.existsSync(final)) {
     errors.push(`финал не найден: ${path.basename(final)}`);
   } else {
-    const ctx = { projectDir: dir, finalPath: final, manifest, hasMusic: Boolean(hasMusic), model, render, deps };
+    const ctx = { projectDir: dir, finalPath: final, manifest, hasMusic: Boolean(hasMusic), model, render, skipTextReason, deps };
     for (const check of checks) {
       try {
         gates.push(...await check.run(ctx));

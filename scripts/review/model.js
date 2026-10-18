@@ -218,6 +218,11 @@ function buildReviewState({
     resolveProjectPath(resolvedProjectDir, manifest.source.localPath, { mustExist: true, type: 'file' }),
   ) !== preview.sourceSha256;
   const motionApprovalChanged = motion && brief.status === 'approved' && entry.sha256 !== currentBriefHash;
+  // Финал этой версии уже скопирован из просмотренного preview (D-051): рендер не нужен.
+  const latestRender = manifest.renders.find((render) => render.dir === manifest.latestRender);
+  const finalFromPreview = Boolean(preview && brief.status === 'approved' && latestRender
+    && latestRender.status === 'complete' && latestRender.source === 'preview'
+    && latestRender.briefPath === manifest.currentBrief && latestRender.sha256 === preview.sha256);
 
   let transcriptPath;
   try {
@@ -257,6 +262,7 @@ function buildReviewState({
       fps: preview.fps,
       generatedAt: preview.generatedAt,
     } : null,
+    finalFromPreview,
     brief: {
       ...(motion ? { kind: 'motion-reel' } : {}),
       status: reviewBrief.status,

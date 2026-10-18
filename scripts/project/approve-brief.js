@@ -5,6 +5,7 @@ const {
   approveBrief,
   createOrOpenProject,
 } = require('./workspace');
+const { finalizeApproval } = require('./approve-final');
 
 const args = process.argv.slice(2);
 const confirmPreviewViewed = args.includes('--confirm-preview-viewed');
@@ -23,6 +24,14 @@ try {
   const approved = approveBrief(project, draftPath, { root: repositoryRoot, confirmPreviewViewed });
   console.log(`approved: ${approved.jsonPath}`);
   if (approved.markdownPath) console.log(`markdown: ${approved.markdownPath}`);
+  // Чистый полный preview этой версии становится финалом копированием, final QA – в фоне (#110, D-051).
+  const final = finalizeApproval(project, approved.jsonPath);
+  if (final.promoted) {
+    console.log(`final: ${final.finalPath} (копия просмотренного preview, без рендера)`);
+    if (!final.already) console.log('final QA идёт в фоне – отчёт придёт во входящие (automontage inbox)');
+  } else {
+    console.log(`финал соберёт рендер: ${final.reason}`);
+  }
 } catch (error) {
   console.error(`Не удалось утвердить brief: ${error.message}`);
   process.exit(1);

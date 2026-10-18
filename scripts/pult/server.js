@@ -7,6 +7,7 @@ const { confirmRoughCut } = require('../project/rough-cut');
 const {
   approveBrief, createOrOpenProject, readProjectManifest, resolveProjectPath,
 } = require('../project/workspace');
+const { finalizeApproval } = require('../project/approve-final');
 const { startReviewServer } = require('../review/server');
 const { buildCards, cardIdFor } = require('./cards');
 const { ENTRY_KEY, folderFromKey, scanFolder, scanProjects } = require('./catalog');
@@ -126,6 +127,7 @@ async function startPultServer({
   idleCheckMs = IDLE_CHECK_MS,
   now = () => Date.now(),
   approveBriefImpl = approveBrief,
+  finalizeApprovalImpl = finalizeApproval,
   confirmRoughCutImpl = confirmRoughCut,
   revealImpl = revealInFileManager,
   openWindowImpl = openPultWindow,
@@ -315,6 +317,9 @@ async function startPultServer({
       finalDeclinable: Boolean(entry.needsFinal) && isDeclinableBriefPath(entry.briefPath),
       finalDeclined: Boolean(entry.finalDeclined),
       finalTicket: finalTicket(entry),
+      // Оверлей «ЧЕРНОВИК» поверх плеера, пока brief не утверждён (#110), и состояние фоновой проверки финала.
+      draftPreview: Boolean(entry.draftPreview),
+      finalQa: entry.finalQa || null,
       video: playable ? { kind: entry.video.kind, url: `/media/video?${versioned}` } : null,
       videoUnsupported: Boolean(videoFile) && !playable,
       thumbUrl: videoFile ? `/media/thumb?${versioned}` : null,
@@ -558,15 +563,18 @@ async function startPultServer({
       // Билет при этом актуален, так что обновление страницы не поможет – нужен новый
       // preview от агента, отсюда отдельный код PREVIEW_DAMAGED.
       if (!servedPreviewMatches(entry)) throw previewDamaged();
+      let approvedWorkspace = null;
+      let approvedResult = null;
       try {
         const projectDir = projectDirOf(entry);
         const workspace = createOrOpenProject({ projectDir });
         const briefFile = resolveProjectPath(projectDir, entry.briefPath, { mustExist: true, type: 'file' });
-        approveBriefImpl(workspace, briefFile, {
+        approvedResult = approveBriefImpl(workspace, briefFile, {
           root: resolvedRoot,
           confirmPreviewViewed: true,
           expectedPreviewSha256: entry.previewSha256,
         });
+        approvedWorkspace = workspace;
       } catch (error) {
         // В лог – только класс ошибки: сообщение движка может содержать абсолютные пути.
         logger.error(`Пульт: движок не принял утверждение (${errorName(error)})`);
@@ -591,7 +599,17 @@ async function startPultServer({
       } catch (error) {
         logger.error(`Пульт: не удалось вернуть карточку из архива после утверждения (${errorName(error)})`);
       }
-      sendJson(response, 201, { ok: true });
+      // Чистый полный preview, который только что посмотрел человек, становится финалом копированием
+      // (#110, DECISIONS.md D-051): пульт не рендерит, он копирует проверенный по sha256 файл; final QA
+      // уходит в фон. Отказ (фрагмент, 4K, старый preview) – обычный путь: агент соберёт финал сам.
+      let final = false;
+      if (approvedResult?.jsonPath) {
+        const outcome = finalizeApprovalImpl(approvedWorkspace, approvedResult.jsonPath, { expectedPreviewSha256: entry.previewSha256 });
+        final = Boolean(outcome?.promoted);
+        // В лог – только сбой копирования, без текста ошибки (в нём бывают пути); обычный отказ – не сбой.
+        if (!final && /^копирование/u.test(outcome?.reason || '')) logger.error('Пульт: копирование preview в финал не удалось – финал соберёт агент');
+      }
+      sendJson(response, 201, { ok: true, final });
       return;
     }
     if (pathname === '/api/roughcut/confirm') {

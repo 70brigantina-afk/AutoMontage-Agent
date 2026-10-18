@@ -510,11 +510,14 @@ function approveBlock(variant) {
   approve.addEventListener('click', async () => {
     approve.disabled = true;
     try {
-      await api('/api/approve', {
+      const result = await api('/api/approve', {
         method: 'POST',
         body: { key: variant.key, ticket: variant.approvalTicket, confirmPreviewViewed: true },
       });
-      notify('Утверждено. Скопируйте фразу для агента – он соберёт финал и проверит его.');
+      // Чистый полный preview пульт сразу копирует в финал (#110); иначе финал собирает агент.
+      notify(result && result.final
+        ? 'Утверждено. Финал готов – можно забирать; проверка финала идёт в фоне.'
+        : 'Утверждено. Скопируйте фразу для агента – он соберёт финал и проверит его.');
       await refresh();
       // Только после успешного утверждения: сервер уже вернул карточку из архива, если она
       // там была (DECISIONS.md D-030). Явный «Вернуть из архива» не должен проходить через
@@ -663,6 +666,18 @@ function applyHistoryMode(active) {
 // Текст подписи под плеером – по статусу текущего варианта, а не по тому, что уже нарисовано:
 // и полная отрисовка (renderDetail), и фоновое обновление (syncDetail) считают её этой же
 // функцией, чтобы утверждение ролика вне пульта (агент через CLI) сразу поменяло подпись.
+// Фоновая проверка продвинутого финала (#110): подпись в боковой колонке, без путей и подробностей.
+const FINAL_QA_LABELS = {
+  running: 'Идёт фоновая проверка финала (повторная расшифровка) – финал уже можно забирать.',
+  pass: 'Проверка финала пройдена.',
+  warn: 'Проверка финала нашла замечания – агент посмотрит отчёт.',
+  failed: 'Проверка финала не выполнена – агент запустит её вручную.',
+};
+
+function finalQaLabelFor(variant) {
+  return variant.finalQa ? FINAL_QA_LABELS[variant.finalQa.state] || '' : '';
+}
+
 function videoLabelFor(variant) {
   if (variant.video) {
     // Утверждённый brief ещё без финала (флаг сервера needsFinal): на экране – уже
@@ -871,18 +886,24 @@ function renderDetail() {
   // мёртвый плеер без источника выглядел рабочим, но не проигрывал ничего.
   let video = null;
   const getVideo = () => video;
-  function showVideo(url, label) {
+  // «ЧЕРНОВИК» поверх плеера, пока brief не утверждён (#110): чистый полный preview сам надписи не несёт.
+  // Только для текущего неутверждённого preview, не для версий из Истории.
+  const draftOverlay = el('div', 'player__draft', 'ЧЕРНОВИК');
+  draftOverlay.dataset.draftOverlay = '';
+  draftOverlay.setAttribute('aria-hidden', 'true');
+  function showVideo(url, label, draft = false) {
     if (!video) {
       video = el('video', 'player');
       video.controls = true;
       video.preload = 'metadata';
       video.dataset.player = '';
-      playerSlot.replaceChildren(video);
+      playerSlot.replaceChildren(video, draftOverlay);
       // Под настоящим плеером подпись стоит отдельной строкой, а не внутри заглушки.
       playerSlot.after(videoLabel);
     }
     video.src = url;
     videoLabel.textContent = label;
+    draftOverlay.hidden = !draft;
   }
   function showPlaceholder(label) {
     if (video) {
@@ -903,7 +924,7 @@ function renderDetail() {
   videoLabel.dataset.currentLabel = videoLabelFor(variant);
   function showCurrent() {
     const label = videoLabel.dataset.currentLabel;
-    if (variant.video) showVideo(mediaUrl(variant.video.url), label);
+    if (variant.video) showVideo(mediaUrl(variant.video.url), label, Boolean(variant.draftPreview));
     else showPlaceholder(label);
   }
   showCurrent();
@@ -956,10 +977,14 @@ function renderDetail() {
   badge.dataset.variantStatus = '';
   const next = el('p', 'detail__next', variant.nextStep);
   next.dataset.variantNext = '';
+  const finalQa = el('p', 'detail__qa', finalQaLabelFor(variant));
+  finalQa.dataset.finalQa = '';
+  finalQa.hidden = !variant.finalQa;
   side.append(
     offerSlot,
     badge,
     next,
+    finalQa,
     roughCutBlock(variant),
     approveBlock(variant),
     roughCutCutsBlock(variant, getVideo),
@@ -1050,6 +1075,15 @@ function syncDetail(card) {
     badge.className = `badge badge--${variant.status}`;
   }
   if (next) next.textContent = variant.nextStep;
+  // Утверждение вне пульта (агент в CLI, Review) снимает «ЧЕРНОВИК» с того же файла без перерисовки.
+  const overlay = document.querySelector('[data-view="detail"] [data-draft-overlay]');
+  if (overlay && !historyShown()) overlay.hidden = !variant.draftPreview;
+  const finalQaLine = document.querySelector('[data-view="detail"] [data-final-qa]');
+  if (finalQaLine) {
+    const label = finalQaLabelFor(variant);
+    finalQaLine.hidden = !label;
+    if (finalQaLine.textContent !== label) finalQaLine.textContent = label;
+  }
   // Решение о финале могли принять вне этой карточки (агент по словам пользователя в чате):
   // блок действий дешёвый и без ввода – просто заменяем его свежим.
   const actionsBox = document.querySelector('[data-view="detail"] .actions');
