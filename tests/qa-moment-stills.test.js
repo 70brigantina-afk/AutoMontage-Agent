@@ -11,11 +11,22 @@ const { hashFile } = require('../scripts/pult/files');
 const { inputsSha256, renderMomentStills, resolveStillsTarget, stillsIndexStale } = require('../scripts/qa/moment-stills');
 const sheet = require('../scripts/layer/sheet');
 const { layerSrcSha256 } = require('../scripts/layer/common');
+const { buildReport, gate, writeReport } = require('../scripts/qa/report');
 
 const hasFfmpeg = toolAvailable('ffmpeg') && toolAvailable('ffprobe');
 
-// Слой без настоящего layer new: layer.json, план, точка входа и (по желанию) манифест layer check.
-function fakeLayer(projectDir, { name = 'motion-v01', manifest = true, srcSha256 = true, plan = 'export const plan = { texts: [] };\n' } = {}) {
+// Отчёт layer check слоя name (qa/layer-<name>-check.json), как его пишет scripts/layer/check.js:
+// status – итог гейтов (pass, warn, fail) или error; sha256 – манифест, по которому судили гейты.
+function writeCheckReport(projectDir, name, { status = 'pass', sha256 = hashFile(path.join(projectDir, name, 'out', 'manifest.json')) } = {}) {
+  const gates = status === 'error' ? [] : [gate('G1', 'тест', { status })];
+  const inputs = [{ role: 'manifest', path: `${name}/out/manifest.json`, sha256 }];
+  writeReport(projectDir, `layer-${name}-check`, buildReport({
+    kind: 'layer-check', layer: name, profile: 'avatar', gates, inputs, error: status === 'error' ? 'сбой сборки' : null,
+  }));
+}
+
+// Слой без настоящего layer new: layer.json, план, точка входа и (по желанию) манифест и отчёт layer check.
+function fakeLayer(projectDir, { name = 'motion-v01', manifest = true, srcSha256 = true, check = 'pass', plan = 'export const plan = { texts: [] };\n' } = {}) {
   const project = readProjectManifest(projectDir);
   const sourcePath = path.join(projectDir, project.source.localPath);
   const layerDir = path.join(projectDir, name);
@@ -31,6 +42,7 @@ function fakeLayer(projectDir, { name = 'motion-v01', manifest = true, srcSha256
     fs.mkdirSync(path.join(layerDir, 'out'), { recursive: true });
     const stamp = srcSha256 ? { srcSha256: layerSrcSha256(layerDir) } : {};
     fs.writeFileSync(path.join(layerDir, 'out', 'manifest.json'), JSON.stringify({ ...manifestFixture({ seconds: 4 }), ...stamp }));
+    if (check) writeCheckReport(projectDir, name, { status: check });
   }
   return layerDir;
 }
@@ -249,6 +261,87 @@ test('resolveStillsTarget: манифест без srcSha256 (старый layer
   fakeLayer(projectDir, { srcSha256: false });
   assert.throws(() => resolveStillsTarget(projectDir, readProjectManifest(projectDir)),
     (error) => error.message.includes('сначала `automontage layer check`') && error.code === 'CRITIC_STILLS_REFUSED');
+});
+
+// Скиллы обещают: слой должен пройти layer check, иначе кадры stills отказывают. Манифест layer check
+// пишет до гейтов, поэтому одного манифеста мало – нужен отчёт без провала к этому самому манифесту.
+const refusedWithCheck = (pattern) => (error) => error.code === 'CRITIC_STILLS_REFUSED'
+  && pattern.test(error.message) && error.message.includes('automontage layer check');
+
+test('resolveStillsTarget: layer check слоя провален (СТОП) – отказ, кадры не рисуются', { skip: !hasFfmpeg }, (t) => {
+  const { projectDir } = makeLayerProject(t, { seconds: 2 });
+  fakeLayer(projectDir, { check: 'fail' });
+  assert.throws(() => resolveStillsTarget(projectDir, readProjectManifest(projectDir)), refusedWithCheck(/не пройден/u));
+});
+
+test('resolveStillsTarget: layer check закончился ошибкой – отказ', { skip: !hasFfmpeg }, (t) => {
+  const { projectDir } = makeLayerProject(t, { seconds: 2 });
+  fakeLayer(projectDir, { check: 'error' });
+  assert.throws(() => resolveStillsTarget(projectDir, readProjectManifest(projectDir)), refusedWithCheck(/не пройден/u));
+});
+
+test('resolveStillsTarget: манифест есть, а отчёта layer check нет – отказ', { skip: !hasFfmpeg }, (t) => {
+  const { projectDir } = makeLayerProject(t, { seconds: 2 });
+  fakeLayer(projectDir, { check: false });
+  assert.throws(() => resolveStillsTarget(projectDir, readProjectManifest(projectDir)), refusedWithCheck(/нет отчёта/u));
+});
+
+test('resolveStillsTarget: отчёт layer check к другому манифесту – отказ', { skip: !hasFfmpeg }, (t) => {
+  const { projectDir } = makeLayerProject(t, { seconds: 2 });
+  fakeLayer(projectDir, { check: false });
+  writeCheckReport(projectDir, 'motion-v01', { sha256: '0'.repeat(64) });
+  assert.throws(() => resolveStillsTarget(projectDir, readProjectManifest(projectDir)), refusedWithCheck(/другому манифесту/u));
+});
+
+test('resolveStillsTarget: layer check с предупреждениями – кадры рисуются', { skip: !hasFfmpeg }, (t) => {
+  const { projectDir } = makeLayerProject(t, { seconds: 2 });
+  fakeLayer(projectDir, { check: 'warn' });
+  assert.equal(resolveStillsTarget(projectDir, readProjectManifest(projectDir)).kind, 'layer');
+});
+
+test('layer sheet --source stills: layer check провален – код 2 и подсказка', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir } = makeLayerProject(t, { seconds: 2 });
+  fakeLayer(projectDir, { check: 'fail' });
+  const errors = [];
+  let drawn = 0;
+  const code = await sheet.run({ 'project-dir': projectDir, mode: 'moments', source: 'stills' }, {
+    log: () => {}, warn: (l) => errors.push(l), renderStillsImpl: async () => { drawn += 1; },
+  });
+  assert.equal(code, 2);
+  assert.equal(drawn, 0);
+  assert.match(errors.join('\n'), /не пройден/u);
+});
+
+test('stillsIndexStale: кадры старого слоя устарели, когда появился новый слой', { skip: !hasFfmpeg }, (t) => {
+  const { projectDir } = makeLayerProject(t, { seconds: 2 });
+  fakeLayer(projectDir, { name: 'motion-v01' });
+  const manifest = readProjectManifest(projectDir);
+  const index = { kind: 'layer', layer: 'motion-v01', inputsSha256: inputsSha256(resolveStillsTarget(projectDir, manifest)) };
+  assert.equal(stillsIndexStale(projectDir, manifest, index), null);
+  fakeLayer(projectDir, { name: 'motion-v02' });
+  assert.match(stillsIndexStale(projectDir, manifest, index), /motion-v02/u);
+});
+
+test('resolveStillsTarget motion-reel: --layer – отказ, без --layer – цель motion-reel', (t) => {
+  const { fixture } = require('./helpers/motion-workflow-fixture.cjs');
+  const { workspace } = fixture(t);
+  const manifest = readProjectManifest(workspace.dir);
+  assert.throws(() => resolveStillsTarget(workspace.dir, manifest, { layer: 'motion-v01' }),
+    (error) => error.code === 'CRITIC_STILLS_REFUSED' && /--layer/u.test(error.message) && /motion-reel/u.test(error.message));
+  assert.equal(resolveStillsTarget(workspace.dir, manifest, { layer: null }).kind, 'motion-reel');
+});
+
+test('layer sheet --source stills у motion-reel: --layer – код 2, кадры не рисуются', async (t) => {
+  const { fixture } = require('./helpers/motion-workflow-fixture.cjs');
+  const { workspace } = fixture(t);
+  const errors = [];
+  let drawn = 0;
+  const code = await sheet.run({ 'project-dir': workspace.dir, mode: 'moments', layer: 'motion-v01' }, {
+    log: () => {}, warn: (l) => errors.push(l), renderStillsImpl: async () => { drawn += 1; },
+  });
+  assert.equal(code, 2);
+  assert.equal(drawn, 0);
+  assert.match(errors.join('\n'), /--layer/u);
 });
 
 test('layerSrcSha256: любой файл src/ (и вложенный) меняет отпечаток', (t) => {

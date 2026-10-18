@@ -49,6 +49,36 @@ function readJsonFile(file, label) {
   }
 }
 
+// layer check пишет out/manifest.json до гейтов, поэтому манифест есть и у слоя со СТОПом. Кадры
+// критика рисуются только по пройденной проверке: отчёт qa/layer-<слой>-check.json этого слоя без
+// провала и без ошибки (предупреждения допустимы), и судил он ровно этот манифест (sha256 байтов).
+function assertLayerCheckPassed(projectDir, layerName, manifestSha256, check) {
+  const { exitCodeFor, projectQaDir } = require('./report');
+  const qaDir = projectQaDir(projectDir);
+  const file = qaDir && path.join(qaDir, `layer-${layerName}-check.json`);
+  if (!file || !fs.statSync(file, { throwIfNoEntry: false })?.isFile()) {
+    throw refuse(`нет отчёта layer check слоя ${layerName} (qa/layer-${layerName}-check.json) – ${check}`);
+  }
+  let report;
+  try {
+    report = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    report = null;
+  }
+  if (report === null || typeof report !== 'object' || report.kind !== 'layer-check' || report.layer !== layerName
+    || typeof report.summary?.status !== 'string') {
+    throw refuse(`отчёт qa/layer-${layerName}-check.json не читается – ${check}`);
+  }
+  const checked = Array.isArray(report.inputs) ? report.inputs.find((input) => input?.role === 'manifest') : null;
+  if (checked?.sha256 !== manifestSha256) {
+    throw refuse(`отчёт layer check слоя ${layerName} относится к другому манифесту – ${check}`);
+  }
+  if (exitCodeFor(report) !== 0) {
+    throw refuse(`layer check слоя ${layerName} не пройден (${report.summary.status === 'fail' ? 'СТОП' : 'оценить нельзя'}): `
+      + `исправьте план по qa/layer-${layerName}-check.txt и снова ${check}`);
+  }
+}
+
 function layerTarget(projectDir, manifest, layerName) {
   const { readCheckedManifest } = require('../layer/render');
   const layerDir = resolveProjectPath(projectDir, layerName, { label: 'layer', mustExist: true, type: 'directory' });
@@ -68,13 +98,14 @@ function layerTarget(projectDir, manifest, layerName) {
   if (![fps, width, height, durationInFrames].every((v) => Number.isFinite(v) && v > 0)) {
     throw new Error('layer.json: fps, width, height и durationInFrames должны быть числами больше 0');
   }
-  const { manifest: layerManifest } = readCheckedManifest(projectDir, layerDir);
+  const { manifest: layerManifest, input: manifestInput } = readCheckedManifest(projectDir, layerDir);
   const srcSha256 = layerSrcSha256(layerDir);
   // Манифест от другого src/ (правка plan.js, words.js или компонентов после layer check, или старый
   // манифест без отпечатка) – моменты и проверенный план разошлись бы с тем, что нарисует композиция.
   if (layerManifest?.srcSha256 !== srcSha256) {
     throw refuse(`out/manifest.json слоя ${layerName} устарел: src/ менялась после проверки – ${check}`);
   }
+  assertLayerCheckPassed(projectDir, layerName, manifestInput.sha256, check);
   return {
     kind: 'layer', projectDir, layerName, entry: path.join(layerDir, 'src', 'index.jsx'), compositionId: layer.composition,
     inputProps: {}, publicDir: path.join(layerDir, 'public'), width, height, fps, durationInFrames, durationSec: durationInFrames / fps,
@@ -113,10 +144,16 @@ function motionReelTarget(projectDir, manifest) {
 }
 
 // Цель кадров: motion-reel (паспорт projectKind) или слой motion-vNN (--layer или последний). Проект
-// без слоя и не motion-reel – урок: отказ «критик только для моушн-роликов». Слой без манифеста
-// layer check – отказ «сначала `automontage layer check`». Оба отказа – error.code REFUSED.
+// без слоя и не motion-reel – урок: отказ «критик только для моушн-роликов». Слой без манифеста или
+// без пройденного layer check – отказ «сначала `automontage layer check`». --layer у motion-reel –
+// отказ. Все отказы – error.code REFUSED.
 function resolveStillsTarget(projectDir, manifest, { layer = null } = {}) {
-  if (manifest.projectKind === 'motion-reel') return motionReelTarget(projectDir, manifest);
+  if (manifest.projectKind === 'motion-reel') {
+    if (layer !== null && layer !== undefined) {
+      throw refuse('--layer – только для слоя motion-vNN: у motion-reel слоя нет, кадры рисуются по черновику ТЗ');
+    }
+    return motionReelTarget(projectDir, manifest);
+  }
   if (layer !== null && layer !== undefined && !LAYER_NAME.test(String(layer))) throw new Error('--layer должен быть вида motion-v01');
   const layerName = layer || latestLayerName(projectDir);
   if (!layerName) {
@@ -145,13 +182,17 @@ function inputsSha256(target, readFile = fs.readFileSync) {
 }
 
 // Устарели ли кадры индекса qa/moments-stills-*.json: null – актуальны, иначе причина. Дёшево, без
-// Remotion: у слоя тот же inputsSha256 по файлам слоя (план, layer.json, src/); у motion-reel пересчёт
+// Remotion: у слоя – это последний слой проекта и тот же inputsSha256 по его файлам (src/plan.js,
+// sha256 исходника из layer.json, отпечаток всей src/); у motion-reel пересчёт
 // props тяжёлый, поэтому сверяется sha256 файла текущего ТЗ с briefSha256 индекса (медиа сцен
 // записаны в ТЗ со своим sha256, так что их смена тоже меняет ТЗ).
 function stillsIndexStale(projectDir, manifest, index) {
   try {
     if (index?.kind === 'layer') {
       if (!LAYER_NAME.test(String(index.layer))) return 'в индексе нет имени слоя';
+      // Preview соберут из последнего слоя: кадры более раннего слоя критику уже не про то.
+      const latest = latestLayerName(projectDir);
+      if (latest !== index.layer) return `кадры слоя ${index.layer}, а последний слой проекта ${latest ?? 'не найден'}`;
       const layerDir = resolveProjectPath(projectDir, index.layer, { label: 'layer', mustExist: true, type: 'directory' });
       const layer = readJsonFile(path.join(layerDir, 'layer.json'), 'layer.json');
       const current = inputsSha256({

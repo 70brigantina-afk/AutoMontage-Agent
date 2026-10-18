@@ -666,9 +666,10 @@ automontage layer stock --project-dir projects/<ролик> --layer motion-v01 \
   «остановиться», файлы `qa/critic-NN.json|txt`).
 - В режиме moments по умолчанию `--source stills`: кадры рисуются прямо из композиции
   (`renderStill`, без рендера видео и без preview) – для слоя (последний `motion-vNN` или
-  `--layer`; нужен `layer check` после последней правки `src/` – манифест хранит отпечаток
-  `srcSha256`, иначе код 2 «сначала `automontage layer check`») и для
-  motion-reel. Файлы – `qa/moments-stills-<8 знаков sha256 входов>.*`, индекс с `source: 'stills'`
+  `--layer`; нужен пройденный `layer check` после последней правки `src/`: манифест хранит отпечаток
+  `srcSha256`, а отчёт `qa/layer-<слой>-check.json` должен быть без провала и ошибки и относиться к
+  этому манифесту (sha256 его байтов), иначе код 2 «сначала `automontage layer check`») и для
+  motion-reel (`--layer` у motion-reel – код 2). Файлы – `qa/moments-stills-<8 знаков sha256 входов>.*`, индекс с `source: 'stills'`
   и `inputsSha256`: sha256 склейки плана слоя (или ТЗ), JSON props, sha256 исходника, затем у
   слоя – отпечаток всей папки `src/` (`srcSha256`: компоненты, `words.js`), у motion-reel – sha256
   медиа сцен по порядку. Индекс хранит `kind` и имя слоя (`layer`) или sha256 файла ТЗ
@@ -684,9 +685,10 @@ automontage layer stock --project-dir projects/<ролик> --layer motion-v01 \
   это `inputsSha256` последнего индекса `qa/moments-stills-*.json`, для preview – sha256 текущего
   preview. Старое поле `previewSha256` принимается как `subject: "preview"`.
 - Устаревшие кадры – код 2: отчёт не к последнему индексу; или кадры не перерисованы после правки
-  (у слоя команда пересчитывает `inputsSha256` по плану, `layer.json` и `src/`, у motion-reel
-  сверяет sha256 текущего ТЗ с `briefSha256` индекса) – подсказка «перерисуй кадры: automontage
-  layer sheet --mode moments»; индекс старого формата без `kind` – тоже.
+  (у слоя кадры должны быть от последнего слоя проекта, и команда пересчитывает `inputsSha256` по
+  `src/plan.js`, sha256 исходника `source.sha256` из `layer.json` и отпечатку всей `src/`; у
+  motion-reel сверяет sha256 текущего ТЗ с `briefSha256` индекса) – подсказка «перерисуй кадры:
+  automontage layer sheet --mode moments»; индекс старого формата без `kind` – тоже.
 - Повторный отчёт к тем же кадрам или тому же preview – код 2. Круги и сравнение оценок
   считаются отдельно для stills и для preview: отчёт по preview после кругов по кадрам – круг 1.
 

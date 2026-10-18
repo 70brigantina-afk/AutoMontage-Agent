@@ -1092,9 +1092,11 @@ flowchart TD
   `renderStill` (один бандл и один браузер, jpeg 85, тяжёлый слот `critic stills <папка>`). Цель –
   слой `motion-vNN` (`--layer` или последний; композиция и public слоя, моменты из
   `out/manifest.json`, который обязан нести `srcSha256` – отпечаток `src/`, записанный `layer
-  check`; нет манифеста или src/ менялась – код 2 «сначала `automontage layer check`») или
-  motion-reel (`MotionReel`, props черновика ТЗ, медиа через `withPreviewMediaBundleAsync`); урок без
-  слоя – код 2 «критик только для моушн-роликов». Файлы – `qa/moments-stills-<sha8>*`, индекс с
+  check`, и отчёт `qa/layer-<слой>-check.json` без провала и ошибки к этому манифесту (sha256 его
+  байтов в `inputs`); нет манифеста или отчёта, src/ менялась, check провален – код 2 «сначала
+  `automontage layer check`») или motion-reel (`MotionReel`, props черновика ТЗ, медиа через
+  `withPreviewMediaBundleAsync`; `--layer` – код 2); урок без слоя – код 2 «критик только для
+  моушн-роликов». Файлы – `qa/moments-stills-<sha8>*`, индекс с
   `source: 'stills'` и `inputsSha256` (план или ТЗ, props, исходник). `--source preview` – кадры
   готового preview в `qa/moments-<sha8>*`, индекс с `source: 'preview'` и `previewSha256`. `scripts/qa/critic.js` (`automontage critic`) проверяет
   JSON-отчёт агента-критика по `schema/critic-report.schema.json`. Предмет отчёта – `subject`
