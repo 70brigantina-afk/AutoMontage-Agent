@@ -170,6 +170,20 @@ Remote URL и неподтверждённый файл не подставля�
 Во всех примерах `<id>` и `vNN` замени фактическими путями последней ревизии из `project.json`.
 Команды `node scripts/...` выполняй из корня движка.
 
+**Цикл критика** (до рендера preview). Кадры рисуются прямо из композиции черновика ТЗ, без
+рендера видео: `automontage layer sheet --mode moments --project-dir projects/<id>` кладёт кадры
+ключевых моментов, лист и телефонный лист в `qa/moments-stills-*`. Запусти субагента
+`motion-critic` (в Codex – отдельного агента с заданием из
+[`motion-critic.md`](../reel-turnkey/references/motion-critic.md)); передай ему путь к свежему
+`qa/moments-stills-<sha8>.json`, который напечатал `layer sheet`, и номер круга. Он только читает
+кадры и отвечает JSON-отчётом. Сохрани ответ в файл и прогони `automontage critic --project-dir
+projects/<id> --report <файл.json>`: команда сверяет отчёт с последними кадрами и текущим ТЗ и
+печатает решение. При `fix` («Решение: исправлять») исправь три названные худшие сцены новой
+draft-ревизией ТЗ и снова нарисуй кадры → критик (не больше трёх кругов). Внутри цикла только кадры:
+рендер видео внутри цикла запрещён (`automontage preview` до решения критика не запускай). При
+`stop` («Решение: остановиться») собери preview: он рендерится один раз после `stop`. В сообщении
+пользователю назови оценки и причину остановки.
+
 ```bash
 automontage preview --project-dir projects/<id> --brief brief/vNN-draft.motion.json
 node scripts/qa-preview.js --project-dir projects/<id>

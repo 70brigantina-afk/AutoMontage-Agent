@@ -669,8 +669,26 @@ automontage layer stock --project-dir projects/<ролик> --layer motion-v01 \
   `--layer`; нужен `layer check` после последней правки `src/` – манифест хранит отпечаток
   `srcSha256`, иначе код 2 «сначала `automontage layer check`») и для
   motion-reel. Файлы – `qa/moments-stills-<8 знаков sha256 входов>.*`, индекс с `source: 'stills'`
-  и `inputsSha256` (план или ТЗ, props, исходник). Урок без слоя – код 2 «критик только для
-  моушн-роликов». `--source preview` – прежние кадры готового preview (`source: 'preview'`).
+  и `inputsSha256`: sha256 склейки плана слоя (или ТЗ), JSON props, sha256 исходника, затем у
+  слоя – отпечаток всей папки `src/` (`srcSha256`: компоненты, `words.js`), у motion-reel – sha256
+  медиа сцен по порядку. Индекс хранит `kind` и имя слоя (`layer`) или sha256 файла ТЗ
+  (`briefSha256`). Урок без слоя – код 2 «критик только для моушн-роликов». `--source preview` –
+  прежние кадры готового preview (`source: 'preview'`).
+
+**`critic`** (`automontage critic --project-dir <проект> --report <файл.json>`)
+
+- Порядок: цикл критика идёт до рендера preview – `layer check` → `layer sheet --mode moments`
+  (кадры из композиции) → критик → правки → снова кадры, не больше трёх кругов. Внутри цикла
+  только кадры: рендер видео внутри цикла запрещён; preview рендерится один раз после `stop`.
+- Предмет отчёта – `"subject": "stills"` или `"subject": "preview"` и `subjectSha256`. Для stills
+  это `inputsSha256` последнего индекса `qa/moments-stills-*.json`, для preview – sha256 текущего
+  preview. Старое поле `previewSha256` принимается как `subject: "preview"`.
+- Устаревшие кадры – код 2: отчёт не к последнему индексу; или кадры не перерисованы после правки
+  (у слоя команда пересчитывает `inputsSha256` по плану, `layer.json` и `src/`, у motion-reel
+  сверяет sha256 текущего ТЗ с `briefSha256` индекса) – подсказка «перерисуй кадры: automontage
+  layer sheet --mode moments»; индекс старого формата без `kind` – тоже.
+- Повторный отчёт к тем же кадрам или тому же preview – код 2. Круги и сравнение оценок
+  считаются отдельно для stills и для preview: отчёт по preview после кругов по кадрам – круг 1.
 
 ## Ограничения
 

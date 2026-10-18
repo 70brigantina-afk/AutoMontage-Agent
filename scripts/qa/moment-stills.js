@@ -69,15 +69,16 @@ function layerTarget(projectDir, manifest, layerName) {
     throw new Error('layer.json: fps, width, height и durationInFrames должны быть числами больше 0');
   }
   const { manifest: layerManifest } = readCheckedManifest(projectDir, layerDir);
+  const srcSha256 = layerSrcSha256(layerDir);
   // Манифест от другого src/ (правка plan.js, words.js или компонентов после layer check, или старый
   // манифест без отпечатка) – моменты и проверенный план разошлись бы с тем, что нарисует композиция.
-  if (layerManifest?.srcSha256 !== layerSrcSha256(layerDir)) {
+  if (layerManifest?.srcSha256 !== srcSha256) {
     throw refuse(`out/manifest.json слоя ${layerName} устарел: src/ менялась после проверки – ${check}`);
   }
   return {
     kind: 'layer', projectDir, layerName, entry: path.join(layerDir, 'src', 'index.jsx'), compositionId: layer.composition,
     inputProps: {}, publicDir: path.join(layerDir, 'public'), width, height, fps, durationInFrames, durationSec: durationInFrames / fps,
-    planPath: path.join(layerDir, 'src', 'plan.js'), sourceSha256: layer.source.sha256, manifest: layerManifest,
+    planPath: path.join(layerDir, 'src', 'plan.js'), sourceSha256: layer.source.sha256, srcSha256, manifest: layerManifest,
   };
 }
 
@@ -93,6 +94,10 @@ function motionReelTarget(projectDir, manifest) {
   const workspace = { dir: projectDir, manifest, sourcePath };
   const prepared = prepareMotionPreview({ workspace, brief });
   const sourceSha256 = hashFile(sourcePath);
+  // Байты медиа сцен по порядку сцен: пересобранный под тем же путём пакет (ai-promo) меняет отпечаток.
+  const mediaSha256 = (Array.isArray(brief.scenes) ? brief.scenes : [])
+    .filter((scene) => scene?.scene === 'media' && typeof scene.media?.src === 'string')
+    .map((scene) => hashFile(resolveProjectPath(projectDir, scene.media.src, { label: 'media.src', mustExist: true, type: 'file' })));
   const { props } = prepared;
   // Медиа сцен (staticFile) и голос живут в lease черновика – тот же, что у automontage preview.
   const withMedia = (operation) => withPreviewMediaBundleAsync({
@@ -103,7 +108,7 @@ function motionReelTarget(projectDir, manifest) {
     kind: 'motion-reel', projectDir, entry: path.join(ROOT, 'src', 'index.js'), compositionId: prepared.composition,
     inputProps: props, publicDir: null, width: props.width, height: props.height, fps: props.fps,
     durationInFrames: props.durationInFrames, durationSec: props.durationInFrames / props.fps,
-    planPath, sourceSha256, brief, withMedia,
+    planPath, briefSha256: hashFile(planPath), sourceSha256, mediaSha256, brief, withMedia,
   };
 }
 
@@ -123,13 +128,47 @@ function resolveStillsTarget(projectDir, manifest, { layer = null } = {}) {
 }
 
 // sha256 от склейки по порядку: байты плана слоя (или ТЗ motion-reel), JSON входных props, sha256
-// исходника спикера (или голоса). Отчёт критика привязывается к нему: правка плана – новые кадры.
+// исходника спикера (или голоса), затем у слоя – srcSha256 всей папки src/ (компоненты, words.js),
+// у motion-reel – sha256 медиа сцен по порядку. Отчёт критика привязывается к нему: правка – новые кадры.
 function inputsSha256(target, readFile = fs.readFileSync) {
-  return crypto.createHash('sha256')
+  const hash = crypto.createHash('sha256')
     .update(readFile(target.planPath))
     .update(Buffer.from(JSON.stringify(target.inputProps ?? {}), 'utf8'))
-    .update(Buffer.from(String(target.sourceSha256), 'utf8'))
-    .digest('hex');
+    .update(Buffer.from(String(target.sourceSha256), 'utf8'));
+  if (target.kind === 'layer') {
+    if (typeof target.srcSha256 !== 'string') throw new Error('inputsSha256: у слоя нет srcSha256');
+    hash.update(Buffer.from(target.srcSha256, 'utf8'));
+  } else if (target.kind === 'motion-reel') {
+    for (const sha of target.mediaSha256 ?? []) hash.update(Buffer.from(String(sha), 'utf8'));
+  }
+  return hash.digest('hex');
+}
+
+// Устарели ли кадры индекса qa/moments-stills-*.json: null – актуальны, иначе причина. Дёшево, без
+// Remotion: у слоя тот же inputsSha256 по файлам слоя (план, layer.json, src/); у motion-reel пересчёт
+// props тяжёлый, поэтому сверяется sha256 файла текущего ТЗ с briefSha256 индекса (медиа сцен
+// записаны в ТЗ со своим sha256, так что их смена тоже меняет ТЗ).
+function stillsIndexStale(projectDir, manifest, index) {
+  try {
+    if (index?.kind === 'layer') {
+      if (!LAYER_NAME.test(String(index.layer))) return 'в индексе нет имени слоя';
+      const layerDir = resolveProjectPath(projectDir, index.layer, { label: 'layer', mustExist: true, type: 'directory' });
+      const layer = readJsonFile(path.join(layerDir, 'layer.json'), 'layer.json');
+      const current = inputsSha256({
+        kind: 'layer', planPath: path.join(layerDir, 'src', 'plan.js'), inputProps: {},
+        sourceSha256: layer?.source?.sha256, srcSha256: layerSrcSha256(layerDir),
+      });
+      return current === index.inputsSha256 ? null : `src/ или layer.json слоя ${index.layer} менялись после кадров`;
+    }
+    if (index?.kind === 'motion-reel') {
+      if (!manifest.currentBrief) return 'у проекта нет текущего ТЗ';
+      const briefPath = resolveProjectPath(projectDir, manifest.currentBrief, { label: 'currentBrief', mustExist: true, type: 'file' });
+      return hashFile(briefPath) === index.briefSha256 ? null : 'ТЗ менялось после кадров';
+    }
+    return 'индекс старого формата (без kind)';
+  } catch (error) {
+    return `входы кадров не прочитаны: ${error.message}`;
+  }
 }
 
 // deps: bundle/openBrowser/selectComposition/renderStill – Remotion (по умолчанию как у text-boxes),
@@ -199,7 +238,9 @@ async function renderMomentStills({ target, moments, outDir, name, sha = inputsS
       timeSec: moment.timeSec, kind: moment.kind, ref: moment.ref, label: moment.label,
     }));
     const indexPath = path.join(outDir, `${name}.json`);
-    writeJson(indexPath, { version: 1, source: 'stills', inputsSha256: sha, moments: entries });
+    const identity = target.kind === 'layer' ? { kind: 'layer', layer: target.layerName }
+      : { kind: target.kind, briefSha256: target.briefSha256 };
+    writeJson(indexPath, { version: 1, source: 'stills', inputsSha256: sha, ...identity, moments: entries });
     log(`кадров для критика: ${entries.length}`);
     return { framesDir, sheetPath, phonePath, indexPath, inputsSha256: sha, gate: emptyFrameGate(samples) };
   } finally {
@@ -213,4 +254,4 @@ async function renderMomentStills({ target, moments, outDir, name, sha = inputsS
   }
 }
 
-module.exports = { CRITIC_LONG_SIDE, JPEG_QUALITY, REFUSED, inputsSha256, renderMomentStills, resolveStillsTarget };
+module.exports = { CRITIC_LONG_SIDE, JPEG_QUALITY, REFUSED, inputsSha256, renderMomentStills, resolveStillsTarget, stillsIndexStale };

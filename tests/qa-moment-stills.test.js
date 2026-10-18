@@ -8,7 +8,7 @@ const { makeLayerProject } = require('./helpers/layer-project');
 const { manifestFixture } = require('./helpers/manifest-fixtures');
 const { readProjectManifest } = require('../scripts/project/workspace');
 const { hashFile } = require('../scripts/pult/files');
-const { inputsSha256, renderMomentStills, resolveStillsTarget } = require('../scripts/qa/moment-stills');
+const { inputsSha256, renderMomentStills, resolveStillsTarget, stillsIndexStale } = require('../scripts/qa/moment-stills');
 const sheet = require('../scripts/layer/sheet');
 const { layerSrcSha256 } = require('../scripts/layer/common');
 
@@ -41,7 +41,7 @@ function layerTarget(root) {
   return {
     kind: 'layer', projectDir: path.join(root, 'kit-fixture'), entry: path.join(root, 'index.jsx'), compositionId: 'Layer',
     inputProps: {}, publicDir: path.join(root, 'public'), width: 1080, height: 1920, fps: 25, durationSec: 4,
-    durationInFrames: 100, planPath, sourceSha256: 'a'.repeat(64),
+    durationInFrames: 100, planPath, sourceSha256: 'a'.repeat(64), srcSha256: 'f'.repeat(64), layerName: 'motion-v01',
   };
 }
 
@@ -172,6 +172,60 @@ test('inputsSha256: правка plan.js меняет хеш входов, то�
   assert.notEqual(inputsSha256(target), before);
   assert.notEqual(inputsSha256({ ...target, inputProps: { x: 1 } }), inputsSha256(target));
   assert.notEqual(inputsSha256({ ...target, sourceSha256: 'b'.repeat(64) }), inputsSha256(target));
+  assert.notEqual(inputsSha256({ ...target, srcSha256: 'b'.repeat(64) }), inputsSha256(target), 'src/ слоя входит в отпечаток');
+  assert.throws(() => inputsSha256({ ...target, srcSha256: undefined }), /srcSha256/u);
+  const reel = { ...target, kind: 'motion-reel', srcSha256: undefined, mediaSha256: ['1'.repeat(64)] };
+  assert.notEqual(inputsSha256({ ...reel, mediaSha256: ['2'.repeat(64)] }), inputsSha256(reel), 'байты медиа входят в отпечаток');
+});
+
+test('renderMomentStills: индекс слоя хранит kind и имя слоя', async (t) => {
+  const root = tmp(t);
+  const { deps } = stubs();
+  const result = await renderMomentStills({ target: layerTarget(root), moments: moments.slice(0, 1), outDir: path.join(root, 'qa'), name: 'n', log: () => {} }, deps);
+  const index = JSON.parse(fs.readFileSync(result.indexPath, 'utf8'));
+  assert.equal(index.kind, 'layer');
+  assert.equal(index.layer, 'motion-v01');
+});
+
+test('inputsSha256 слоя: правка компонента вне plan.js меняет отпечаток, stillsIndexStale это видит', { skip: !hasFfmpeg }, (t) => {
+  const { projectDir } = makeLayerProject(t, { seconds: 2 });
+  const layerDir = fakeLayer(projectDir);
+  const manifest = readProjectManifest(projectDir);
+  const target = resolveStillsTarget(projectDir, manifest);
+  const sha = inputsSha256(target);
+  const index = { kind: 'layer', layer: 'motion-v01', inputsSha256: sha };
+  assert.equal(stillsIndexStale(projectDir, manifest, index), null, 'пересчёт по файлам слоя совпадает с отпечатком цели');
+  fs.mkdirSync(path.join(layerDir, 'src', 'components'), { recursive: true });
+  fs.writeFileSync(path.join(layerDir, 'src', 'components', 'Title.jsx'), 'export const Title = () => null;\n');
+  assert.match(stillsIndexStale(projectDir, manifest, index), /менялись после кадров/u);
+  assert.notEqual(inputsSha256({ ...target, srcSha256: layerSrcSha256(layerDir) }), sha);
+  assert.match(stillsIndexStale(projectDir, manifest, { inputsSha256: sha }), /старого формата/u);
+});
+
+test('resolveStillsTarget motion-reel: смена байтов медиа сцены меняет inputsSha256, индекс хранит sha ТЗ', async (t) => {
+  const { fixture } = require('./helpers/motion-workflow-fixture.cjs');
+  const { createHash } = require('node:crypto');
+  const { publishBriefRevision } = require('../scripts/project/workspace');
+  const { workspace, brief } = fixture(t);
+  const mediaPath = path.join(workspace.dir, 'assets', 'broll', 'pack.png');
+  fs.mkdirSync(path.dirname(mediaPath), { recursive: true });
+  fs.writeFileSync(mediaPath, 'png-1');
+  const withMedia = { ...brief, scenes: [{ scene: 'kinetic-title', start: 0, end: 1, text: 'Точный' },
+    { scene: 'media', start: 1, end: 2, media: { kind: 'image', src: 'assets/broll/pack.png', sha256: createHash('sha256').update('png-1').digest('hex'), fit: 'cover' } }] };
+  publishBriefRevision(workspace, { brief: withMedia, kind: 'motion-reel' });
+  const before = resolveStillsTarget(workspace.dir, readProjectManifest(workspace.dir));
+  assert.equal(before.mediaSha256.length, 1);
+  assert.equal(before.briefSha256, hashFile(before.planPath));
+  fs.writeFileSync(mediaPath, 'png-2');
+  const after = resolveStillsTarget(workspace.dir, readProjectManifest(workspace.dir));
+  assert.notEqual(inputsSha256(after), inputsSha256(before), 'пересобранный под тем же путём пакет меняет отпечаток');
+  const root = tmp(t);
+  const { deps } = stubs();
+  const result = await renderMomentStills({ target: { ...after, withMedia: null, publicDir: null }, moments: moments.slice(0, 1), outDir: path.join(root, 'qa'), name: 'n', log: () => {} }, deps);
+  const index = JSON.parse(fs.readFileSync(result.indexPath, 'utf8'));
+  assert.equal(index.kind, 'motion-reel');
+  assert.equal(index.briefSha256, after.briefSha256);
+  assert.equal(stillsIndexStale(workspace.dir, readProjectManifest(workspace.dir), index), null);
 });
 
 test('resolveStillsTarget: слой без out/manifest.json – «сначала automontage layer check»', { skip: !hasFfmpeg }, (t) => {

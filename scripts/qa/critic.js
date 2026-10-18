@@ -100,7 +100,7 @@ function latestStillsIndex(projectDir) {
     try { index = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { index = null; }
     if (!isObject(index) || index.source !== 'stills' || typeof index.inputsSha256 !== 'string') continue;
     const mtimeMs = fs.statSync(file).mtimeMs;
-    if (!best || mtimeMs > best.mtimeMs || (mtimeMs === best.mtimeMs && name > best.name)) best = { name, mtimeMs, inputsSha256: index.inputsSha256 };
+    if (!best || mtimeMs > best.mtimeMs || (mtimeMs === best.mtimeMs && name > best.name)) best = { name, mtimeMs, inputsSha256: index.inputsSha256, index };
   }
   return best;
 }
@@ -156,11 +156,12 @@ function formatCriticReport(saved) {
 
 const CRITIC_FILE = /^critic-(\d+)\.json$/u;
 
-// Цепочка кругов: сохранённые critic-*.json по порядку номеров после последнего решения «остановиться».
-// Каждый круг меняет предмет отчёта (новые кадры из композиции или новый preview), поэтому sha в
-// цепочке меняется и в выборе не участвует.
-// next – свободный номер файла (максимальный + 1), существующие отчёты не перезаписываются.
-function savedChain(projectDir, warn) {
+// Цепочка кругов: сохранённые critic-*.json того же предмета (stills или preview) по порядку номеров
+// после его последнего решения «остановиться». Отчёты другого предмета в цепочку и сравнение оценок не
+// входят: preview после двух кругов по кадрам stills – круг 1 своей цепочки. Каждый круг меняет sha
+// предмета (новые кадры или новый preview), поэтому sha в выборе не участвует.
+// last – последний отчёт того же предмета; next – свободный номер файла (максимальный + 1).
+function savedChain(projectDir, warn, subject) {
   const dir = projectQaDir(projectDir);
   if (!dir) return { chain: [], next: 1 };
   const entries = fs.readdirSync(dir)
@@ -176,7 +177,9 @@ function savedChain(projectDir, warn) {
       warn(`⚠️ qa/${entry.name} не читается или повреждён: пропускаем его при подсчёте кругов`);
       continue;
     }
-    last = { name: entry.name.replace(/\.json$/u, ''), ...reportSubject(saved.report) };
+    const item = { name: entry.name.replace(/\.json$/u, ''), ...reportSubject(saved.report) };
+    if (item.subject !== subject) continue;
+    last = item;
     if (saved.decision.action === 'stop') chain = [];
     else chain.push(saved.report);
   }
@@ -226,6 +229,13 @@ async function main(argv = process.argv.slice(2), { log = console.log, error = c
       error(`❌ отчёт к устаревшим кадрам: subjectSha256 не совпадает с последним индексом qa/${latest.name}. План или ТЗ менялись, пусть критик посмотрит новые кадры.`);
       return 2;
     }
+    // Кадры сами могли устареть: план или ТЗ поменяли после layer sheet, а кадры не перерисовали.
+    const { stillsIndexStale } = require('./moment-stills');
+    const stale = stillsIndexStale(projectDir, manifest, latest.index);
+    if (stale) {
+      error(`❌ кадры qa/${latest.name} устарели (${stale}): перерисуй кадры: automontage layer sheet --mode moments --project-dir "${projectDir}", затем пусть критик посмотрит новые`);
+      return 2;
+    }
   } else {
     const current = manifest.currentPreview;
     if (!current) { error('❌ у проекта нет текущего preview: сначала соберите preview'); return 2; }
@@ -235,7 +245,7 @@ async function main(argv = process.argv.slice(2), { log = console.log, error = c
     }
   }
   try {
-    const { chain: previous, next, last } = savedChain(projectDir, error);
+    const { chain: previous, next, last } = savedChain(projectDir, error, subject.subject);
     if (last && last.subject === subject.subject && last.sha256 === subject.sha256) {
       error(subject.subject === 'stills'
         ? `❌ отчёт к этим кадрам уже сохранён (${last.name}); после правок снова automontage layer check и layer sheet --mode moments`

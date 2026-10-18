@@ -299,13 +299,29 @@ test('CLI: номер файла – максимальный существую
 });
 
 // Индекс кадров из композиции, как его пишет layer sheet --mode moments --source stills.
-function writeStillsIndex(projectDir, sha, mtimeSec) {
+function writeStillsIndex(projectDir, sha, mtimeSec, identity = { kind: 'layer', layer: 'motion-v01' }) {
   const dir = path.join(projectDir, 'qa');
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `moments-stills-${sha.slice(0, 8)}.json`);
-  fs.writeFileSync(file, JSON.stringify({ version: 1, source: 'stills', inputsSha256: sha, moments: [] }));
+  fs.writeFileSync(file, JSON.stringify({ version: 1, source: 'stills', inputsSha256: sha, ...identity, moments: [] }));
   if (mtimeSec !== undefined) fs.utimesSync(file, mtimeSec, mtimeSec);
   return file;
+}
+
+// Слой motion-v01 без layer new: layer.json и src/ – всё, по чему критик пересчитывает отпечаток кадров.
+function writeLayer(projectDir, plan = 'export const plan = 1;\n') {
+  const src = path.join(projectDir, 'motion-v01', 'src');
+  fs.mkdirSync(src, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, 'motion-v01', 'layer.json'), JSON.stringify({ version: 1, source: { localPath: 'x', sha256: 'e'.repeat(64) } }));
+  fs.writeFileSync(path.join(src, 'plan.js'), plan);
+  return currentLayerSha(projectDir);
+}
+
+function currentLayerSha(projectDir) {
+  const { inputsSha256 } = require('../scripts/qa/moment-stills');
+  const { layerSrcSha256 } = require('../scripts/layer/common');
+  const layerDir = path.join(projectDir, 'motion-v01');
+  return inputsSha256({ kind: 'layer', planPath: path.join(layerDir, 'src', 'plan.js'), inputProps: {}, sourceSha256: 'e'.repeat(64), srcSha256: layerSrcSha256(layerDir) });
 }
 
 const stillsReport = (scores, sha, extra = {}) => {
@@ -338,25 +354,29 @@ test('CLI: отчёт к кадрам stills с sha последнего инд�
   const projectDir = scaffold(t);
   const manifest = readProjectManifest(projectDir);
   writeProjectManifest(projectDir, { ...manifest, currentPreview: null }, { expectedManifest: manifest });
-  writeStillsIndex(projectDir, OTHER_SHA);
-  const res = await runCli(projectDir, stillsReport([6, 7, 9], OTHER_SHA));
+  const sha = writeLayer(projectDir);
+  writeStillsIndex(projectDir, sha);
+  const res = await runCli(projectDir, stillsReport([6, 7, 9], sha));
   assert.equal(res.code, 0, res.err);
   const saved = readSaved(projectDir, 'critic-01.json');
   assert.equal(saved.report.subject, 'stills');
-  assert.equal(saved.report.subjectSha256, OTHER_SHA);
+  assert.equal(saved.report.subjectSha256, sha);
   assert.equal(saved.decision.action, 'fix');
 });
 
 test('CLI: план поменяли и кадры перерисованы – отчёт к старому inputsSha256 даёт код 2', async (t) => {
   const projectDir = scaffold(t);
   const now = Date.now() / 1000;
-  writeStillsIndex(projectDir, OTHER_SHA, now - 100);
-  writeStillsIndex(projectDir, 'c'.repeat(64), now);
-  const res = await runCli(projectDir, stillsReport([6, 7, 9], OTHER_SHA));
+  const oldSha = writeLayer(projectDir, 'export const plan = 1;\n');
+  writeStillsIndex(projectDir, oldSha, now - 100);
+  const newSha = writeLayer(projectDir, 'export const plan = 2;\n');
+  writeStillsIndex(projectDir, newSha, now);
+  const res = await runCli(projectDir, stillsReport([6, 7, 9], oldSha));
   assert.equal(res.code, 2);
   assert.match(res.err, /устаревшим кадрам/u);
   assert.equal(fs.existsSync(path.join(projectDir, 'qa', 'critic-01.json')), false);
-  assert.equal((await runCli(projectDir, stillsReport([6, 7, 9], 'c'.repeat(64)))).code, 0);
+  const ok = await runCli(projectDir, stillsReport([6, 7, 9], newSha));
+  assert.equal(ok.code, 0, ok.err);
 });
 
 test('CLI: кадров stills нет – код 2 с подсказкой layer sheet', async (t) => {
@@ -368,9 +388,10 @@ test('CLI: кадров stills нет – код 2 с подсказкой layer
 
 test('CLI: повторный отчёт к тем же кадрам stills отклоняется', async (t) => {
   const projectDir = scaffold(t);
-  writeStillsIndex(projectDir, OTHER_SHA);
-  assert.equal((await runCli(projectDir, stillsReport([6, 7, 9], OTHER_SHA))).code, 0);
-  const again = await runCli(projectDir, stillsReport([8, 8, 9], OTHER_SHA, { round: 2 }));
+  const sha = writeLayer(projectDir);
+  writeStillsIndex(projectDir, sha);
+  assert.equal((await runCli(projectDir, stillsReport([6, 7, 9], sha))).code, 0);
+  const again = await runCli(projectDir, stillsReport([8, 8, 9], sha, { round: 2 }));
   assert.equal(again.code, 2);
   assert.match(again.err, /уже сохранён \(critic-01\)/u);
 });
@@ -388,4 +409,83 @@ test('CLI: subject preview с subjectSha256 сверяется с текущим
   const legacy = await runCli(projectDir, report([8, 8, 9], { round: 2 }));
   assert.equal(legacy.code, 2);
   assert.match(legacy.err, /уже сохранён/u);
+});
+
+test('CLI: план слоя изменён после кадров, кадры не перерисованы – код 2 «перерисуй кадры»', async (t) => {
+  const projectDir = scaffold(t);
+  const sha = writeLayer(projectDir, 'export const plan = 1;\n');
+  writeStillsIndex(projectDir, sha);
+  fs.writeFileSync(path.join(projectDir, 'motion-v01', 'src', 'plan.js'), 'export const plan = 2;\n');
+  const res = await runCli(projectDir, stillsReport([6, 7, 9], sha));
+  assert.equal(res.code, 2);
+  assert.match(res.err, /перерисуй кадры: automontage layer sheet --mode moments/u);
+  assert.equal(fs.existsSync(path.join(projectDir, 'qa', 'critic-01.json')), false);
+});
+
+test('CLI: правка компонента вне plan.js меняет отпечаток кадров, новый отчёт принимается', async (t) => {
+  const projectDir = scaffold(t);
+  const first = writeLayer(projectDir);
+  writeStillsIndex(projectDir, first);
+  assert.equal((await runCli(projectDir, stillsReport([6, 7, 9], first))).code, 0);
+  fs.mkdirSync(path.join(projectDir, 'motion-v01', 'src', 'components'), { recursive: true });
+  fs.writeFileSync(path.join(projectDir, 'motion-v01', 'src', 'components', 'Title.jsx'), 'export const Title = () => null;\n');
+  // Без перерисовки кадров старый отчёт устарел.
+  const stale = await runCli(projectDir, stillsReport([7, 8, 9], first, { round: 2 }));
+  assert.equal(stale.code, 2);
+  assert.match(stale.err, /перерисуй кадры/u);
+  const second = currentLayerSha(projectDir);
+  assert.notEqual(second, first, 'правка компонента меняет inputsSha256');
+  writeStillsIndex(projectDir, second, Date.now() / 1000 + 10);
+  const res = await runCli(projectDir, stillsReport([7, 8, 9], second, { round: 2 }));
+  assert.equal(res.code, 0, res.err);
+  assert.equal(readSaved(projectDir, 'critic-02.json').report.round, 2);
+});
+
+test('CLI: motion-reel – индекс stills сверяется с sha файла текущего ТЗ', async (t) => {
+  const { fixture } = require('./helpers/motion-workflow-fixture.cjs');
+  const { workspace } = fixture(t);
+  const projectDir = workspace.dir;
+  const briefPath = path.join(projectDir, readProjectManifest(projectDir).currentBrief);
+  const original = fs.readFileSync(briefPath);
+  const briefSha256 = require('node:crypto').createHash('sha256').update(original).digest('hex');
+  writeStillsIndex(projectDir, OTHER_SHA, undefined, { kind: 'motion-reel', briefSha256 });
+  fs.writeFileSync(briefPath, Buffer.concat([original, Buffer.from('\n')]));
+  const stale = await runCli(projectDir, stillsReport([6, 7, 9], OTHER_SHA));
+  assert.equal(stale.code, 2);
+  assert.match(stale.err, /ТЗ менялось после кадров.*перерисуй кадры/u);
+  fs.writeFileSync(briefPath, original);
+  const ok = await runCli(projectDir, stillsReport([6, 7, 9], OTHER_SHA));
+  assert.equal(ok.code, 0, ok.err);
+});
+
+test('CLI: индекс stills старого формата без kind – код 2 «перерисуй кадры»', async (t) => {
+  const projectDir = scaffold(t);
+  writeStillsIndex(projectDir, OTHER_SHA, undefined, {});
+  const res = await runCli(projectDir, stillsReport([6, 7, 9], OTHER_SHA));
+  assert.equal(res.code, 2);
+  assert.match(res.err, /перерисуй кадры/u);
+});
+
+test('CLI: круги stills и preview – отдельные цепочки; preview после двух кругов stills – круг 1', async (t) => {
+  const projectDir = scaffold(t);
+  const first = writeLayer(projectDir, 'export const plan = 1;\n');
+  writeStillsIndex(projectDir, first);
+  assert.equal((await runCli(projectDir, stillsReport([6, 7, 9], first))).code, 0);
+  const second = writeLayer(projectDir, 'export const plan = 2;\n');
+  writeStillsIndex(projectDir, second, Date.now() / 1000 + 10);
+  assert.equal((await runCli(projectDir, stillsReport([7, 8, 9], second, { round: 2 }))).code, 0);
+  assert.equal(readSaved(projectDir, 'critic-02.json').report.round, 2);
+  const preview = await runCli(projectDir, report([6, 7, 9], { round: 1 }));
+  assert.equal(preview.code, 0, preview.err);
+  assert.equal(preview.err, '');
+  const saved = readSaved(projectDir, 'critic-03.json');
+  assert.equal(saved.report.round, 1);
+  assert.equal(saved.decision.action, 'fix');
+  // И обратно: следующий круг stills продолжает свою цепочку – круг 3, третий круг останавливает.
+  const third = writeLayer(projectDir, 'export const plan = 3;\n');
+  writeStillsIndex(projectDir, third, Date.now() / 1000 + 20);
+  assert.equal((await runCli(projectDir, stillsReport([8, 9, 9], third, { round: 3 }))).code, 0);
+  const stills3 = readSaved(projectDir, 'critic-04.json');
+  assert.equal(stills3.report.round, 3);
+  assert.match(stills3.decision.reason, /третий круг/u);
 });

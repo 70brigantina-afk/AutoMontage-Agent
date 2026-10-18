@@ -68,6 +68,32 @@ test('motion-critic: цикл критика идёт до рендера previe
   }
 });
 
+test('motion-critic: маршрут motion-reel через ТЗ (раздел 4) – цикл критика до automontage preview', () => {
+  const text = read('skills/motion-reel/SKILL.md');
+  const start = text.indexOf('## 4. Покажи настоящий preview');
+  const end = text.indexOf('\n## 5.', start);
+  assert.ok(start >= 0 && end > start, 'раздел 4');
+  const section = text.slice(start, end);
+  const critic = section.indexOf('**Цикл критика**');
+  const preview = section.indexOf('automontage preview --project-dir');
+  assert.ok(critic >= 0, 'раздел 4: шаг критика');
+  assert.ok(preview > critic, 'раздел 4: цикл критика раньше automontage preview');
+  assert.ok(section.includes('layer sheet --mode moments'), 'раздел 4: кадры из композиции по ТЗ');
+  assert.ok(section.includes('automontage critic'), 'раздел 4: automontage critic');
+  assert.ok(section.includes('motion-critic'), 'раздел 4: субагент');
+  assert.ok(section.includes('moments-stills-'), 'раздел 4: индекс кадров');
+  assert.ok(section.includes('рендер видео внутри цикла запрещён'), 'раздел 4: запрет рендера видео в цикле');
+  assert.match(section, /один раз после `stop`/u, 'раздел 4: preview один раз после stop');
+});
+
+test('MOTION-KIT: критик – subject, subjectSha256, устаревшие кадры и порядок до preview', () => {
+  const doc = read('docs/MOTION-KIT.md');
+  for (const needle of ['subjectSha256', '"subject"', 'moments-stills-', 'inputsSha256', 'перерисуй кадры', 'рендер видео внутри цикла запрещён']) {
+    assert.ok(doc.includes(needle), `MOTION-KIT: ${needle}`);
+  }
+  assert.match(doc, /один раз после `stop`/u);
+});
+
 test('motion-critic: задание критику описывает кадры из композиции и subjectSha256', () => {
   const doc = read(CRITIC_DOC);
   assert.ok(doc.includes('moments-stills-'));
