@@ -264,6 +264,30 @@ test('лист ключевых моментов получает момент �
   assert.equal(push.timeSec, 5.48);
 });
 
+test('цепочка удерживаемых наездов считается за линейное время, значения не зависят от порядка кадров', () => {
+  const count = 20;
+  const long = { ...cfg, durationInFrames: 25 * (count + 3) };
+  const items = Array.from({ length: count }, (_, i) => still(`el-${i}`, 0.5, count + 2,
+    { x: 100 + (i % 4) * 150, y: 300 + (i % 5) * 250, w: 300, h: 200 }));
+  const pushes = items.map((item, i) => ({ at: i + 1, target: item.id, k: i % 2 ? 1.35 : 1.25 }));
+  const camera = { face, maxScale: 1.4, shots: [{ at: 0, preset: 'W', drift: 'none' }], pushes };
+  const track = kit.compileLayer(plan({ items, camera }), long).camera;
+  assert.equal(track.pushes.length, count);
+  const last = long.durationInFrames - 1;
+  const started = Date.now();
+  const end = kit.cameraAt(track, last);
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed < 200, `cameraAt на ${count} наездах: ${elapsed} мс`);
+  assert.ok(close(end.s, pushes[count - 1].k));
+  // Свежая копия трека (свой кэш) в обратном порядке кадров даёт те же значения.
+  const forward = [];
+  for (let frame = 0; frame <= last; frame += 7) forward.push(kit.cameraAt(track, frame));
+  const copy = { ...track };
+  const backward = [];
+  for (let frame = Math.floor(last / 7) * 7; frame >= 0; frame -= 7) backward.unshift(kit.cameraAt(copy, frame));
+  assert.deepEqual(backward, forward);
+});
+
 // Настоящий рендер шаблона слоя (опт-ин): сток вырастает из карточки screenshot, кадр в середине
 // морфа не пустой (G12) и вставка уже на экране.
 test('реальный кадр середины морфа вставки из элемента не пустой', {

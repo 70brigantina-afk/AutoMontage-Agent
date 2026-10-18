@@ -156,6 +156,20 @@ export function cameraAt(track, frame) {
   return withPushes(track, frame, (track.pushes || []).length);
 }
 
+// Камера в кадре начала наезда i без него самого. Зависит только от трека и i, поэтому считается
+// один раз: без кэша каждый уровень цепочки удерживаемых наездов вызывал withPushes дважды (2^n).
+// Кэш по объекту трека: скомпилированный трек не меняется, новый трек (withAways) – новый ключ.
+const anchorCache = new WeakMap();
+function pushAnchor(track, i) {
+  let cache = anchorCache.get(track);
+  if (!cache) { cache = new Map(); anchorCache.set(track, cache); }
+  if (!cache.has(i)) {
+    const from = track.pushes[i].from;
+    cache.set(i, i > 0 ? withPushes(track, from, i) : planAt(track, from));
+  }
+  return cache.get(i);
+}
+
 // Камера с учётом первых limit наездов. Наезд ведёт центр видимого окна исходника и масштаб от
 // стартового состояния к цели. Стартовое состояние – камера в этом кадре БЕЗ этого наезда (план с
 // дрейфом, покачиванием и панчем или удержание предыдущего наезда), поэтому наезд за наездом
@@ -167,7 +181,7 @@ function withPushes(track, frame, limit) {
   if (i < 0) return plain;
   const push = track.pushes[i];
   const start = i > 0 ? withPushes(track, frame, i) : plain;
-  const anchor = i > 0 ? withPushes(track, push.from, i) : planAt(track, push.from);
+  const anchor = pushAnchor(track, i);
   const { width: W, height: H, face } = track;
   const t = PUSH_EASE(Math.min(1, Math.max(0, (frame - push.from) / push.frames)));
   const target = pushCenter(screenToSource(push.box, anchor, face), { width: W, height: H, k: push.k });
