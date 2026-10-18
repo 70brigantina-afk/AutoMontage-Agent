@@ -13,6 +13,14 @@ const MOTION_SCENES = [
   'cta',
 ];
 
+// Переходы между сценами: тот же список и те же значения, что в src/motion/transitions.js
+// (ESM-модуль композиции; совпадение проверяет tests/motion-transitions.test.js). frames – в кадрах
+// эталона 25 fps и пересчитываются под FPS ролика той же формулой, что ref25 в motion-kit.
+const MOTION_TRANSITION_TYPES = ['cut', 'fade', 'slide', 'wipe', 'push'];
+const TRANSITION_FRAMES_25 = { default: 10, min: 6, max: 15 };
+const DIRECTED_TRANSITIONS = new Set(['slide', 'wipe']);
+const ref25 = (frames, fps) => Math.max(1, Math.round((frames * fps) / 25));
+
 const MOTION_MEDIA_EXTENSIONS = {
   image: new Set(['.avif', '.gif', '.jpeg', '.jpg', '.png', '.webp']),
   video: new Set(['.m4v', '.mov', '.mp4', '.webm']),
@@ -77,6 +85,54 @@ function containsExecutableMarkup(value) {
   return false;
 }
 
+// Вход в сцену index из предыдущей. Сцена начинается ровно в start, предыдущая удлиняется на
+// длину перехода, поэтому перекрытие возможно только встык и только с достаточно длинными сценами.
+function transitionErrors(scenes, index, fps) {
+  const transition = scenes[index]?.transition;
+  if (!transition || typeof transition !== 'object') return [];
+  const at = `scenes[${index}].transition`;
+  const errors = [];
+  const { type, frames, direction } = transition;
+  if (!MOTION_TRANSITION_TYPES.includes(type)) {
+    return [`${at}.type: неизвестный переход "${type}", допустимо: ${MOTION_TRANSITION_TYPES.join(', ')}`];
+  }
+  if (type === 'cut') {
+    if (frames !== undefined) errors.push(`${at}.frames: у склейки cut нет длительности`);
+    if (direction !== undefined) errors.push(`${at}.direction: у склейки cut нет направления`);
+    return errors;
+  }
+  if (index === 0) {
+    return [`${at}: у первой сцены нет предыдущей, входить не из чего – уберите transition или поставьте cut`];
+  }
+  if (direction !== undefined && !DIRECTED_TRANSITIONS.has(type)) {
+    errors.push(`${at}.direction: направление задаётся только у slide и wipe, у ${type} его нет`);
+  }
+  if (frames !== undefined && (!Number.isInteger(frames)
+    || frames < TRANSITION_FRAMES_25.min || frames > TRANSITION_FRAMES_25.max)) {
+    errors.push(`${at}.frames: длительность перехода ${frames} вне ${TRANSITION_FRAMES_25.min}–${TRANSITION_FRAMES_25.max} кадров при 25 fps`);
+    return errors;
+  }
+  if (!Number.isFinite(fps)) return errors;
+  const length = ref25(Number.isInteger(frames) ? frames : TRANSITION_FRAMES_25.default, fps);
+  const scene = scenes[index];
+  const prev = scenes[index - 1];
+  const bounds = (value) => (Number.isFinite(value?.start) && Number.isFinite(value?.end)
+    ? { from: Math.round(value.start * fps), to: Math.round(value.end * fps) } : null);
+  const own = bounds(scene);
+  const before = bounds(prev);
+  if (!own || !before) return errors;
+  if (own.from !== before.to) {
+    errors.push(`${at}: переход возможен только встык – сцена начинается на ${scene.start} с, а предыдущая заканчивается на ${prev.end} с; уберите паузу или поставьте cut`);
+  }
+  if (length > before.to - before.from) {
+    errors.push(`${at}: переход (${length} кадров) длиннее предыдущей сцены (${before.to - before.from} кадров)`);
+  }
+  if (length > own.to - own.from) {
+    errors.push(`${at}: переход (${length} кадров) длиннее самой сцены (${own.to - own.from} кадров)`);
+  }
+  return errors;
+}
+
 function validateMotionBrief(brief, { requireApproved = false } = {}) {
   const errors = schemaErrors(brief);
   const scenes = Array.isArray(brief?.scenes) ? brief.scenes : [];
@@ -118,6 +174,7 @@ function validateMotionBrief(brief, { requireApproved = false } = {}) {
       && Math.round(scene.end * fps) > durationInFrames) {
       errors.push(`scenes[${index}].end: сцена выходит за длительность narration`);
     }
+    errors.push(...transitionErrors(scenes, index, fps));
     if (scene?.scene === 'media' && scene.media) {
       const { kind, src } = scene.media;
       if (!isCanonicalMotionReference(src)) {
@@ -217,6 +274,8 @@ function formatMotionBriefMarkdown(brief) {
 
 module.exports = {
   MOTION_SCENES,
+  MOTION_TRANSITION_TYPES,
+  TRANSITION_FRAMES_25,
   buildDraftMotionProps,
   buildMotionProps,
   formatMotionBriefMarkdown,

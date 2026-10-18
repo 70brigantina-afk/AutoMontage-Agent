@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### Добавлено
+
+- Motion-reel: необязательное поле сцены `transition` (`cut`, `fade`, `slide`, `wipe`, `push`; 6–15 кадров при 25 fps, по умолчанию 10) рендерит вход в сцену через `TransitionSeries`, не сдвигая её начало; ТЗ без переходов рендерится прежними `Sequence`.
+
 ### Изменено
 
 - Remotion обновлён до 4.0.536 (точные версии), `@remotion/bundler` и `@remotion/renderer`
