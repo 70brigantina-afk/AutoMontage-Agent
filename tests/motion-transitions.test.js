@@ -116,6 +116,22 @@ test('переход в сцену после паузы допустим: пр�
   assert.ok(short.errors.some((error) => error.startsWith('scenes[1].transition') && /предыдущ/.test(error)), short.errors.join('; '));
 });
 
+test('короткая сцена: вход fade и выход push не должны накладываться (три сцены в кадре)', () => {
+  const at25 = (secondEnd) => brief({ output: { ...brief().output, fps: 25, durationInFrames: 150 },
+    scenes: [card(0, 3), card(3, secondEnd, { transition: { type: 'fade', frames: 10 } }),
+      card(secondEnd, 6, { transition: { type: 'push', frames: 10 } })] });
+  // B 3–3,4 с = 10 кадров: fade в B идёт на кадрах 75–84, push в C начинается с кадра 80.
+  const overlap = validateMotionBrief(at25(3.4));
+  assert.equal(overlap.ok, false);
+  const error = overlap.errors.find((item) => item.startsWith('scenes[2].transition'));
+  assert.ok(error, overlap.errors.join('; '));
+  assert.match(error, /scenes\[1\]/);
+  assert.match(error, /удлините|укоротите/);
+  // Та же схема, но B 3–3,6 с = 15 кадров: fade кончается на кадре 85, push начинается с 85.
+  const fits = validateMotionBrief(at25(3.6));
+  assert.equal(fits.ok, true, fits.errors.join('; '));
+});
+
 test('пауза 0–3 / 4–7 с fade при 30 fps: первая сцена до 4 с плюс переход, вторая ровно в 4 с', () => {
   const { planSceneTransitions } = loadMotion('src/motion/transitions.js');
   const value = twoScenes({ type: 'fade' }, { first: [0, 3], second: [4, 7] });

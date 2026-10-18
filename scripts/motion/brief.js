@@ -136,7 +136,28 @@ function transitionErrors(scenes, index, fps) {
   if (length > own.to - own.from) {
     errors.push(`${at}: переход (${length} кадров) длиннее самой сцены (${own.to - own.from} кадров)`);
   }
+  // Вход в предыдущую сцену должен закончиться не позже, чем начнётся выход из неё в эту сцену,
+  // иначе предыдущая сцена одновременно входит и выходит и в кадре три сцены сразу.
+  const entry = index >= 2 ? resolvedTransitionFrames(prev?.transition, fps) : null;
+  if (entry) {
+    const entryEnd = before.from - entry.lead + entry.length;
+    const exitStart = own.from - lead;
+    if (entryEnd > exitStart) {
+      errors.push(`${at}: переход ${type} в scenes[${index}] начинается на кадре ${exitStart}, а переход ${prev.transition.type} в scenes[${index - 1}] ещё идёт до кадра ${entryEnd}; удлините scenes[${index - 1}] или укоротите один из переходов`);
+    }
+  }
   return errors;
+}
+
+// Длительность в кадрах FPS ролика и lead корректного не-cut перехода; иначе null.
+function resolvedTransitionFrames(transition, fps) {
+  if (!transition || typeof transition !== 'object' || transition.type === 'cut'
+    || !MOTION_TRANSITION_TYPES.includes(transition.type)) return null;
+  const { frames } = transition;
+  if (frames !== undefined && (!Number.isInteger(frames)
+    || frames < TRANSITION_FRAMES_25.min || frames > TRANSITION_FRAMES_25.max)) return null;
+  const length = ref25(frames ?? TRANSITION_FRAMES_25.default, fps);
+  return { length, lead: transition.type === 'push' ? Math.floor(length / 2) : 0 };
 }
 
 function validateMotionBrief(brief, { requireApproved = false } = {}) {
