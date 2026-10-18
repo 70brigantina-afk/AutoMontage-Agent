@@ -837,7 +837,10 @@ test('Review approval hands the approved brief to the same preview-to-final prom
   const finalized = [];
   const session = await startReviewServer({
     projectDir: f.projectDir, editable: true, open: false, runToolImpl: () => ({ status: 1 }),
-    finalizeApprovalImpl: (ws, approvedPath) => { finalized.push(path.relative(f.projectDir, approvedPath)); return { promoted: true }; },
+    finalizeApprovalImpl: (ws, approvedPath, options) => {
+      finalized.push(path.relative(f.projectDir, approvedPath));
+      return require('../scripts/project/approve-final').finalizeApproval(ws, approvedPath, { ...options, startQa: () => ({ status: 'queued' }) });
+    },
   });
   t.after(() => new Promise((resolve) => session.server.close(resolve)));
   const state = await (await fetch(`${session.origin}/api/state`, { headers: { Authorization: `Bearer ${session.token}` } })).json();
@@ -849,6 +852,10 @@ test('Review approval hands the approved brief to the same preview-to-final prom
       manifestHash: state.session.manifestHash, confirmPreviewViewed: true,
     }),
   });
+  assert.equal(state.finalFromPreview, false);
   assert.equal(response.status, 201);
   assert.deepEqual(finalized, [path.join('brief', 'v01-approved.lesson.json')]);
+  // Review показывает «Финал готов» вместо «Финальный рендер запускается отдельно».
+  assert.equal((await response.json()).state.finalFromPreview, true);
+  assert.equal(readProjectManifest(f.projectDir).renders.at(-1).source, 'preview');
 });

@@ -451,7 +451,9 @@ function createEditor(initialState, token) {
     previewStatus.textContent = previewBusy
       ? 'Создаём смонтированный preview…'
       : state.brief.status === 'approved'
-        ? 'Утверждено. Финальный рендер запускается отдельно.'
+        ? state.finalFromPreview
+          ? 'Утверждено. Финал готов – можно забирать; проверка финала идёт в фоне.'
+          : 'Утверждено. Финальный рендер запускается отдельно.'
         : commands.length
           ? 'Сначала сохраните изменения.'
           : state.currentPreview?.stale
