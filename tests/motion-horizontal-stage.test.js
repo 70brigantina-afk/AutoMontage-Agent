@@ -107,7 +107,8 @@ function children(element) {
 }
 
 test('фон и текстура в 16:9 покрывают весь кадр, в том числе фон сцены при переходах', () => {
-  const { MotionDirector } = loadMotion('src/MotionDirector.jsx', config(1920, 1080));
+  const state = { frame: 0 };
+  const { MotionDirector } = loadMotion('src/MotionDirector.jsx', { ...config(1920, 1080), useCurrentFrame: () => state.frame });
   const card = (start, end, extra = {}) => ({ scene: 'card', title: `Сцена ${start}`, start, end, ...extra });
   const output = { aspect: 'horizontal', width: 1920, height: 1080, fps: 30, durationInFrames: 720 };
   for (const type of ['slide', 'wipe', 'push']) {
@@ -115,8 +116,16 @@ test('фон и текстура в 16:9 покрывают весь кадр, �
     const tree = MotionDirector(buildMotionProps({ brief: value }));
     // Корень и фон каждой сцены – AbsoluteFill без фиксированного размера: весь кадр 1920×1080.
     assert.equal(tree.props.style.width, undefined, type);
-    const backdrops = children(tree).filter((el) => el.props?.['data-motion-scene-backdrop'] === 'true');
-    assert.equal(backdrops.length, 2, type);
+    // Фон сцены (SceneBackdrop) рисуется только в кадрах перехода: берём кадр внутри перехода
+    // (последний у уходящей сцены, первый у входящей).
+    const layers = children(tree).filter((el) => el.type?.name === 'SceneBackdrop');
+    assert.equal(layers.length, 2, type);
+    const backdrops = layers.map((el) => {
+      state.frame = el.props.exitFrames > 0 ? el.props.durationInFrames - 1 : 0;
+      return el.type(el.props);
+    });
+    state.frame = 0;
+    backdrops.forEach((el) => assert.equal(el?.props?.['data-motion-scene-backdrop'], 'true', type));
     backdrops.forEach((el) => {
       assert.equal(el.type, tree.type, `${type}: фон сцены – AbsoluteFill`);
       assert.deepEqual([el.props.style.width, el.props.style.height], [undefined, undefined], type);
