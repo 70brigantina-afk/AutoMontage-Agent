@@ -8,6 +8,7 @@
 // Всё, что сцена показывает после своей живой части (lead + номинальная длина по ТЗ), – стоп-кадр
 // её последнего живого кадра: видео не продолжается, анимации не идут, звук не звучит.
 // Чистые функции; рендер – в src/MotionDirector.jsx.
+import { createElement } from 'react';
 import { linearTiming } from '@remotion/transitions';
 import { fade } from '@remotion/transitions/fade';
 import { slide } from '@remotion/transitions/slide';
@@ -77,6 +78,25 @@ export const planSceneTransitions = (scenes = [], fps) => {
   });
 };
 
+// pushCut держит уходящую сцену непрозрачной до конца перехода и рассчитывает, что входящая её
+// закроет. Сцены прозрачные по краям и между элементами, поэтому без этого видна двойная
+// экспозиция. Обёртка гасит уходящую сцену с прогресса cutProgress: склейка чистая.
+export const pushExitHidden = (progress, cutProgress) => progress >= cutProgress;
+
+const cleanPushCut = (props) => {
+  const base = pushCut(props);
+  const Base = base.component;
+  const CleanPushCut = (componentProps) => {
+    const { presentationDirection, presentationProgress, passedProps } = componentProps;
+    const cut = passedProps.cutProgress;
+    const hide = presentationDirection === 'exiting' && pushExitHidden(presentationProgress, cut);
+    return createElement(Base, hide
+      ? { ...componentProps, passedProps: { ...passedProps, outerExitStyle: { ...passedProps.outerExitStyle, opacity: 0 } } }
+      : componentProps);
+  };
+  return { ...base, component: CleanPushCut };
+};
+
 // Второй аргумент {width, height} – размер кадра; нынешним презентациям он не нужен (slide, wipe и
 // pushCut работают в процентах кадра), но остаётся в контракте для презентаций с точкой привязки.
 export const presentationFor = (transition, size = {}) => {
@@ -89,10 +109,10 @@ export const presentationFor = (transition, size = {}) => {
     // pushCut – жёсткая склейка с коротким наездом (punch-in) на обеих сценах и вспышкой на месте
     // склейки. Входящая сцена видна с прогресса cutProgress. Линейный прогресс frame/frames и
     // cutProgress между кадрами lead-1 и lead дают склейку ровно на кадре lead, то есть в start
-    // сцены по ТЗ (lead кадров перехода идут до start).
+    // сцены по ТЗ (lead кадров перехода идут до start). После склейки уходящая сцена скрыта.
     const lead = transitionLead(transition);
     return {
-      presentation: pushCut({ cutProgress: Math.max(0.5, lead - 0.5) / transition.frames }),
+      presentation: cleanPushCut({ cutProgress: Math.max(0.5, lead - 0.5) / transition.frames }),
       timing,
     };
   }

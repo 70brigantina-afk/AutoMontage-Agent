@@ -10,9 +10,17 @@ export const useTexture = () => useContext(TextureContext);
 
 const fill = { position: 'absolute', inset: 0, pointerEvents: 'none' };
 
+// frame – явный кадр композиции. Фон сцены в режиме переходов лежит внутри sequence, где
+// useCurrentFrame локальный; с глобальным кадром зерно и дрейф идут непрерывно через сцены и
+// совпадают со слоем корня. Без frame – текущий кадр, как раньше.
+const useTextureFrame = (frame) => {
+  const current = useCurrentFrame();
+  return frame ?? current;
+};
+
 // Зерно лежит под сценой: плитка сдвигается раз в 2 кадра на детерминированный шаг.
-export const Grain = ({ opacity = GRAIN_OPACITY, src = null }) => {
-  const frame = useCurrentFrame();
+export const Grain = ({ opacity = GRAIN_OPACITY, src = null, frame: absoluteFrame = null }) => {
+  const frame = useTextureFrame(absoluteFrame);
   const { x, y } = grainOffset(frame);
   return <div aria-hidden="true" data-texture-grain="true" style={{ ...fill,
     backgroundImage: `url(${src ? staticFile(src) : GRAIN_DATA_URI})`, backgroundSize: `${GRAIN_TILE}px ${GRAIN_TILE}px`,
@@ -21,8 +29,8 @@ export const Grain = ({ opacity = GRAIN_OPACITY, src = null }) => {
 };
 
 // Медленный дрейф цветных пятен фона. Слой шире кадра на амплитуду, края не открываются.
-export const Drift = ({ colors = DRIFT_COLOR_KEYS.map((key) => motionTheme[key]), amplitude = 0.06 }) => {
-  const frame = useCurrentFrame();
+export const Drift = ({ colors = DRIFT_COLOR_KEYS.map((key) => motionTheme[key]), amplitude = 0.06, frame: absoluteFrame = null }) => {
+  const frame = useTextureFrame(absoluteFrame);
   const { fps, width, height } = useVideoConfig();
   const { x, y } = driftAt(frame, fps, { amplitude });
   const [first, second] = colors;

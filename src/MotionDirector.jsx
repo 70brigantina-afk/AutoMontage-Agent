@@ -1,4 +1,4 @@
-import { AbsoluteFill, Audio, Freeze, Sequence, staticFile, useVideoConfig } from 'remotion';
+import { AbsoluteFill, Audio, Freeze, Sequence, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import { FontStyle } from './fonts';
 import { sourceVolumeForFrame } from './scenes/BrollMedia';
 import { KineticTitle } from './motion/KineticTitle';
@@ -35,7 +35,18 @@ const sceneElement = (scene, durationInFrames) => {
 // кадров до start, анимация входа начинается в start - lead). Всё после живой части – хвост под
 // переход и пауза перед ним – стоп-кадр последнего живого кадра: Freeze держит картинку и глушит
 // звук клипа, поэтому видео не продолжается и не обрывается в пустоту.
-const renderSceneTransitions = ({ scenes, fps, width, height }) => {
+// Непрозрачный фон сцены в режиме переходов: тот же фон корня и та же текстура, что под сценами.
+// Входящая сцена закрывает уходящую целиком (wipe открывает новую сцену, а не просвет старой,
+// push не даёт двойной экспозиции). Текстура идёт от глобального кадра композиции, поэтому вне
+// перехода кадр совпадает с прежним, а зерно и дрейф не прыгают на границе сцен. Фон лежит вне
+// Freeze: стоп-кадр хвоста держит содержимое, но не текстуру.
+const sceneBackdrop = ({ texture, frame }) => (
+  <AbsoluteFill data-motion-scene-backdrop="true" style={{ background: motionTheme.background }}>
+    {texture === 'subtle' && <><Drift frame={frame} /><Grain frame={frame} /></>}
+  </AbsoluteFill>
+);
+
+const renderSceneTransitions = ({ scenes, fps, width, height, texture, frame }) => {
   const plan = planSceneTransitions(scenes, fps);
   let cursor = 0;
   const items = [];
@@ -52,6 +63,7 @@ const renderSceneTransitions = ({ scenes, fps, width, height }) => {
       : sceneElement(scenes[index], liveFrames);
     items.push(<TransitionSeries.Sequence key={`s${index}`} name={`motion-scene-${index}`}
       offset={from - natural} durationInFrames={durationInFrames}>
+      {sceneBackdrop({ texture, frame })}
       <Freeze frame={freezeFrame} active={(frame) => contentFrameAt(frame, liveFrames) < frame}>
         {content}
       </Freeze>
@@ -63,6 +75,7 @@ const renderSceneTransitions = ({ scenes, fps, width, height }) => {
 
 export const MotionDirector = ({ theme = 'motion-neutral', scenes = [], audioSrc, draftPreview = false, style }) => {
   const { fps, width, height } = useVideoConfig();
+  const frame = useCurrentFrame();
   if (theme !== 'motion-neutral') throw new Error(`Unknown public motion theme: ${theme}`);
   const timedScenes = scenes.map((scene) => ({ scene, ...getMotionTiming(scene, fps),
     audioMode: scene.media?.kind === 'video' ? scene.media.audioMode ?? 'mute' : null,
@@ -75,7 +88,7 @@ export const MotionDirector = ({ theme = 'motion-neutral', scenes = [], audioSrc
     {audioSrc && <Audio src={staticFile(audioSrc)} volume={(frame) => sourceVolumeForFrame({ frame, scenes: timedScenes, fps })} />}
     <TextureContext.Provider value={texture}>
     {hasSceneTransitions(scenes)
-      ? renderSceneTransitions({ scenes, fps, width, height })
+      ? renderSceneTransitions({ scenes, fps, width, height, texture, frame })
       : timedScenes.map(({ scene, from, durationInFrames }, index) => (
         <Sequence key={index} from={from} durationInFrames={durationInFrames}>
           {sceneElement(scene, durationInFrames)}

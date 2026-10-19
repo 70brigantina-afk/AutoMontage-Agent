@@ -224,3 +224,15 @@ test('Sheen is painted before the card content and the content sits above it', (
   assert.match(tag, /position:relative/);
   assert.match(tag, /z-index:1/);
 });
+
+test('Drift and Grain take an explicit absolute frame: inside a scene they match the root layer at the same composition frame', () => {
+  const html = (frame, local, Component) => {
+    const mod = loadMotion('src/details/Texture.jsx', { useCurrentFrame: () => local });
+    return renderToStaticMarkup(React.createElement(mod[Component], frame === null ? {} : { frame }));
+  };
+  for (const Component of ['Grain', 'Drift']) {
+    // Корень на кадре 117 и сцена 2 с локальным кадром 27 (начало sequence – 90) рисуют одно и то же.
+    assert.equal(html(117, 27, Component), html(null, 117, Component), Component);
+    assert.notEqual(html(null, 27, Component), html(null, 117, Component), `${Component}: кадр меняет слой`);
+  }
+});
