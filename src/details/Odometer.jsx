@@ -1,5 +1,5 @@
 import { useCurrentFrame, useVideoConfig } from 'remotion';
-import { formatNumber, odometerColumns, odometerProgress } from './odometer.js';
+import { formatNumber, odometerColumns, odometerProgress, odometerRolled } from './odometer.js';
 
 const LINE = 1.16;
 const STRIP = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0];
@@ -20,6 +20,7 @@ export const Odometer = ({
   const { fps } = useVideoConfig();
   const finalText = formatNumber(value, { decimals, locale });
   const progress = odometerProgress(frame, fps, { rollSec, settleSec, delayFrames });
+  const rolled = odometerRolled(frame, fps, { rollSec, delayFrames });
   const rolling = progress !== 1;
   const stack = layout === 'stack';
   const affix = { color: affixColor, whiteSpace: 'pre' };
@@ -33,7 +34,7 @@ export const Odometer = ({
       <span data-odometer-sizer="true" style={{ visibility: rolling ? 'hidden' : 'visible' }}>{finalText}</span>
       {rolling && <span aria-hidden="true" data-odometer-roll="true"
         style={{ position: 'absolute', left: 0, top: 0, display: 'inline-flex' }}>
-        {odometerColumns(finalText, progress).map((column, index) => column.digit
+        {odometerColumns(finalText, progress, { rolled }).map((column, index) => column.digit
           ? <span key={index} style={{ display: 'inline-block', height: `${LINE}em`, overflow: 'hidden' }}>
             <span style={{ display: 'flex', flexDirection: 'column', transform: stripShift(column) }}>
               {STRIP.map((digit, cell) => <span key={cell} style={{ height: `${LINE}em` }}>{digit}</span>)}

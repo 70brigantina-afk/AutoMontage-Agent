@@ -113,3 +113,17 @@ test('old counter brief without layout stays valid, layout accepts inline and st
   }
   assert.equal(validateMotionBrief({ ...base, scenes: [{ ...base.scenes[0], layout: 'grid' }] }).ok, false);
 });
+
+test('odometerColumns: after the roll all digits settle by the same small offset (no backwards re-roll)', () => {
+  const { odometerColumns, odometerProgress, odometerRolled } = math();
+  const text = `1${NBSP}250${NBSP}000`;
+  for (const fps of [25, 30]) {
+    for (let frame = 0; frame < fps * 3; frame += 1) {
+      if (!odometerRolled(frame, fps)) continue;
+      const offsets = odometerColumns(text, odometerProgress(frame, fps), { rolled: true })
+        .filter(column => column.digit).map(column => column.offset);
+      assert.ok(offsets.every(offset => Math.abs(offset) <= 0.15 + 1e-9), `fps ${fps} frame ${frame}: ${offsets}`);
+      assert.ok(offsets.every(offset => offset === offsets[0]), `fps ${fps} frame ${frame} uniform`);
+    }
+  }
+});

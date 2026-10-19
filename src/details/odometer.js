@@ -27,7 +27,7 @@ export const formatNumber = (value, { decimals, locale = 'ru' } = {}) => {
 
 // offset в высотах цифры: 0 – стоит на итоговой цифре. Младшие разряды делают больше оборотов.
 // До прокрутки (progress 0) каждая цифра показывает 0, при progress > 1 – лёгкий перелёт вперёд.
-export const odometerColumns = (finalText, progress) => {
+export const odometerColumns = (finalText, progress, { rolled = false } = {}) => {
   const chars = [...finalText];
   let seen = 0;
   return chars.map((char) => {
@@ -35,10 +35,15 @@ export const odometerColumns = (finalText, progress) => {
     const turns = 1 + Math.min(seen, 9);
     seen += 1;
     const travel = 10 * turns + Number(char);
-    const offset = progress >= 1 ? progress - 1 : -travel * (1 - Math.max(0, progress));
+    // После прокрутки (rolled) все цифры качаются одинаково на (progress - 1), в обе стороны.
+    const offset = rolled || progress >= 1 ? progress - 1 : -travel * (1 - Math.max(0, progress));
     return { char, digit: true, offset };
   });
 };
+
+// Прокрутка закончилась: дальше только пружина успокоения, без обратного движения разрядов.
+export const odometerRolled = (frame, fps, { rollSec = 1.5, delayFrames = 0 } = {}) =>
+  rollSec <= 0 || (frame - delayFrames) / fps >= rollSec;
 
 export const odometerProgress = (frame, fps, { rollSec = 1.5, settleSec = SETTLE_SEC, delayFrames = 0 } = {}) => {
   if (rollSec <= 0) return 1;
