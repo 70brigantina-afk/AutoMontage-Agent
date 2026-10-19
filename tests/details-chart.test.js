@@ -126,6 +126,19 @@ function renderChart(frame, props) {
 
 const theme = { accent: '#335E99', ink: '#202A36', muted: '#546477', line: '#C3CEDB', fontFamily: 'Onest, sans-serif' };
 
+test('line chart value label keeps a gap from the dot edge of at least 4 px', () => {
+  const markup = renderChart(300, { chartType: 'line', theme,
+    points: [{ label: 'А', value: 10 }, { label: 'Б', value: 30 }, { label: 'В', value: 20 }] });
+  const dots = [...markup.matchAll(/data-chart-dot="true" cx="[\d.]+" cy="([\d.]+)" r="([\d.]+)"/g)];
+  const values = [...markup.matchAll(/data-chart-value="true" style="[^"]*?top:([\d.-]+)px;font-size:([\d.]+)px;line-height:1.16/g)];
+  assert.equal(dots.length, 3);
+  assert.equal(values.length, 3);
+  dots.forEach((dot, index) => {
+    const bottom = Number(values[index][1]) + Number(values[index][2]) * 1.16;
+    assert.ok(Number(dot[1]) - Number(dot[2]) - bottom >= 4, `dot ${index}: gap ${Number(dot[1]) - Number(dot[2]) - bottom}`);
+  });
+});
+
 test('Chart at rest keeps labels and values verbatim and marks them for text checks', () => {
   const markup = renderChart(300, {
     chartType: 'bar', theme, highlight: 1,

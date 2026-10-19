@@ -1,7 +1,7 @@
 import { useCurrentFrame, useVideoConfig } from 'remotion';
 import { evolvePath } from '@remotion/paths';
 import { formatNumber } from './odometer.js';
-import { barGrowth, barShape, barToLine, barToLineStart, chartLayout, dotShape, lineProgress, linePath } from './chart.js';
+import { barGrowth, barShape, barToLine, barToLineStart, chartLayout, DOT_SIZE, dotShape, lineProgress, linePath } from './chart.js';
 
 const VALUE_ROW = 56;
 const LABEL_ROW = 130;
@@ -73,7 +73,7 @@ export const Chart = ({
         return <div key={index}>
           <div data-motion-text="true" data-chart-value="true" style={{
             position: 'absolute', left: bar.x + bar.w / 2 - slot / 2, width: slot, textAlign: 'center',
-            top: bar.y - valueSize * 1.16 - 12, fontSize: valueSize, lineHeight: 1.16, whiteSpace: 'nowrap',
+            top: bar.y - valueSize * 1.16 - (chartType === 'bar' ? 12 : DOT_SIZE / 2 + 4), fontSize: valueSize, lineHeight: 1.16, whiteSpace: 'nowrap',
             fontVariantNumeric: 'tabular-nums', fontWeight: index === highlight ? 800 : 600,
             color: index === highlight ? accent : ink, opacity: growth[index],
           }}>{valueText}</div>
