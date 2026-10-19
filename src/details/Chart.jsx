@@ -12,7 +12,8 @@ const baseSize = (count) => (count <= 3 ? 34 : count <= 5 ? 28 : 22);
 const fitSize = (size, slot, chars) => Math.max(12, Math.min(size, Math.floor(slot / (Math.max(1, chars) * 0.62))));
 
 // Цвета и шрифт – только из пропса theme (для motion-reel это motionTheme). Подписи и значения лежат
-// отдельными HTML-блоками с data-motion-text, SVG рисует только фигуры.
+// отдельными HTML-блоками с data-motion-text (маркер на внешнем блоке, текст во внутреннем div,
+// как у TextBox), SVG рисует только фигуры.
 export const Chart = ({
   points, chartType = 'bar', unit, highlight, theme = {}, width = 800, height = 600,
   startFrame = 0, durationInFrames, locale = 'ru', decimals,
@@ -43,7 +44,7 @@ export const Chart = ({
     style={{ width, height, fontFamily, color: ink, position: 'relative' }}>
     {unit && <div data-motion-text="true" data-chart-unit="true" style={{
       height: UNIT_ROW, fontSize: 28, lineHeight: 1.16, color: muted, whiteSpace: 'nowrap',
-    }}>{unit}</div>}
+    }}><div>{unit}</div></div>}
     <div style={{ position: 'relative', width, height: plotHeight }}>
       <svg width={width} height={plotHeight} viewBox={`0 0 ${width} ${plotHeight}`}
         style={{ position: 'absolute', left: 0, top: 0 }}>
@@ -76,12 +77,12 @@ export const Chart = ({
             top: bar.y - valueSize * 1.16 - (chartType === 'bar' ? 12 : DOT_SIZE / 2 + 4), fontSize: valueSize, lineHeight: 1.16, whiteSpace: 'nowrap',
             fontVariantNumeric: 'tabular-nums', fontWeight: index === highlight ? 800 : 600,
             color: index === highlight ? accent : ink, opacity: growth[index],
-          }}>{valueText}</div>
+          }}><div>{valueText}</div></div>
           <div data-motion-text="true" data-chart-label="true" style={{
             position: 'absolute', left: bar.x + bar.w / 2 - slot / 2, width: slot, top: baseline + BASE_WIDTH + 12,
             textAlign: 'center', fontSize: labelSize, lineHeight: 1.16, overflowWrap: 'anywhere',
             color: muted, boxSizing: 'border-box', padding: '0 4px',
-          }}>{bar.label}</div>
+          }}><div>{bar.label}</div></div>
         </div>;
       })}
     </div>
