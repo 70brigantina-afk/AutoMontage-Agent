@@ -2,12 +2,41 @@ import { useLayoutEffect, useRef } from 'react';
 import { cancelRender, continueRender, delayRender, useCurrentFrame, useVideoConfig } from 'remotion';
 import { safeFor } from '../scenes/safezone';
 import { Sheen, useTexture } from '../details/Texture.jsx';
+import { sheenProgress } from '../details/texture.js';
 import { motionTheme as t, motionPresets, revealProgress } from './motion-theme';
 
-export const MOTION_WIDTH = 1080;
-export const MOTION_HEIGHT = 1920;
+// Две сцены motion: вертикальная 1080×1920 и горизонтальная 1920×1080. Сцена выбирается по
+// реальному кадру композиции (ширина больше высоты – горизонталь) и масштабируется к нему по
+// короткой стороне: k = min(width, height) / 1080. Safe-зона и ширина содержимого – по сцене.
+export const MOTION_STAGES = Object.freeze({
+  vertical: Object.freeze({ width: 1080, height: 1920 }),
+  horizontal: Object.freeze({ width: 1920, height: 1080 }),
+});
+export const stageFor = (width, height) => (width > height ? MOTION_STAGES.horizontal : MOTION_STAGES.vertical);
+const contentWidthFor = (stage, safe) => stage.width - safe.left - safe.right;
+
+// Прежние вертикальные константы: значения не меняются, вертикальные сцены и тесты на них опираются.
+export const MOTION_WIDTH = MOTION_STAGES.vertical.width;
+export const MOTION_HEIGHT = MOTION_STAGES.vertical.height;
 const safe = safeFor(MOTION_WIDTH, MOTION_HEIGHT);
-export const CONTENT_WIDTH = MOTION_WIDTH - safe.left - safe.right;
+export const CONTENT_WIDTH = contentWidthFor(MOTION_STAGES.vertical, safe);
+
+// Сцена текущей композиции для раскладки: {stage, safe, contentWidth, horizontal}.
+export const useMotionStage = () => {
+  const { width, height } = useVideoConfig();
+  const stage = stageFor(width, height);
+  const stageSafe = safeFor(stage.width, stage.height);
+  return { stage, safe: stageSafe, contentWidth: contentWidthFor(stage, stageSafe), horizontal: stage === MOTION_STAGES.horizontal };
+};
+
+// Акцентная черта над safe-зоной и подпись внизу. В вертикали – прежние значения; в горизонтали
+// верхнее поле SAFE_16x9 узкое, поэтому черта стоит по его центру, а подпись ниже (две строки
+// на ширине 1760 вмещают тот же текст, что три строки на 880).
+const ACCENT = { width: 70, height: 8 };
+const CAPTION = { vertical: { height: 160 }, horizontal: { height: 120 } };
+const accentTopFor = (stage, stageSafe) => (stage === MOTION_STAGES.horizontal
+  ? (stageSafe.top - ACCENT.height) / 2
+  : 175);
 
 // Font fit uses the real bundled Cyrillic font, not a Latin character-width estimate.
 // Wait for fit before capturing a frame. No clipping, truncation or omitted words.
@@ -59,31 +88,40 @@ export const useEntrance = (durationInFrames, index = 0, count = 1, spacingSec) 
 
 export const SceneFrame = ({ children, caption }) => {
   const { width, height } = useVideoConfig();
-  const scale = Math.min(width / MOTION_WIDTH, height / MOTION_HEIGHT);
-  return <div style={{ position: 'absolute', width: MOTION_WIDTH, height: MOTION_HEIGHT,
-    left: (width - MOTION_WIDTH * scale) / 2, top: (height - MOTION_HEIGHT * scale) / 2,
+  const { stage, safe: stageSafe, contentWidth, horizontal } = useMotionStage();
+  const scale = Math.min(width / stage.width, height / stage.height);
+  return <div style={{ position: 'absolute', width: stage.width, height: stage.height,
+    left: (width - stage.width * scale) / 2, top: (height - stage.height * scale) / 2,
     transform: `scale(${scale})`, transformOrigin: 'top left',
     color: t.ink, fontFamily: t.fontFamily,
   }}>
-    <div aria-hidden="true" style={{ position: 'absolute', top: 175, left: safe.left, width: 70, height: 8, background: t.accent, borderRadius: 4 }} />
-    <div data-motion-safe="true" style={{ position: 'absolute', top: safe.top, left: safe.left,
-      width: CONTENT_WIDTH, height: MOTION_HEIGHT - safe.top - safe.bottom,
+    <div aria-hidden="true" style={{ position: 'absolute', top: accentTopFor(stage, stageSafe), left: stageSafe.left, width: ACCENT.width, height: ACCENT.height, background: t.accent, borderRadius: 4 }} />
+    <div data-motion-safe="true" style={{ position: 'absolute', top: stageSafe.top, left: stageSafe.left,
+      width: contentWidth, height: stage.height - stageSafe.top - stageSafe.bottom,
       display: 'flex', flexDirection: 'column', gap: 30,
     }}>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 28 }}>{children}</div>
-      {caption && <TextBox data-motion-caption="true" text={caption} height={160} maxSize={34} weight={400}
+      {caption && <TextBox data-motion-caption="true" text={caption} height={CAPTION[horizontal ? 'horizontal' : 'vertical'].height} maxSize={34} weight={400}
         style={{ color: t.muted, borderTop: `2px solid ${t.line}`, paddingTop: 12, boxSizing: 'border-box' }} />}
     </div>
   </div>;
 };
 
+// Блик (subtle) есть в DOM только на свои 12 кадров при 25 fps. Вне прохода карточка та же, что при
+// none: без блика, обёрток и лишнего position. В проходе карточка – свой контекст наложения
+// (isolation), блик с z-index -1 лежит над её фоном и под контентом. children всегда во втором слоте,
+// поэтому смена кадра не перемонтирует их.
 export const Panel = ({ children, style = {}, sheenFrame = 0 }) => {
   const subtle = useTexture() === 'subtle';
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const enterFrame = Math.round(sheenFrame);
+  const sheen = subtle && sheenProgress(frame, fps, enterFrame) !== null;
   const background = style.background || t.panel;
   // Блик контрастирует с фоном карточки: на светлой панели акцентно-светлый, на акцентной белый.
   const sheenColor = background === t.panel ? t.accentSoft : t.panel;
   return <div style={{
     background: t.panel, borderRadius: t.radius, padding: 38, boxSizing: 'border-box',
-    border: `1px solid ${t.line}`, ...(subtle ? { position: 'relative' } : {}), ...style,
-  }}>{subtle && <Sheen enterFrame={Math.round(sheenFrame)} color={sheenColor} />}{subtle ? <div data-panel-content="true" style={{ position: 'relative', zIndex: 1 }}>{children}</div> : children}</div>;
+    border: `1px solid ${t.line}`, ...(sheen ? { position: 'relative', isolation: 'isolate' } : {}), ...style,
+  }}>{sheen ? <Sheen enterFrame={enterFrame} color={sheenColor} zIndex={-1} /> : null}{children}</div>;
 };

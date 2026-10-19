@@ -105,7 +105,8 @@ test('the motion pack template parses and renders silent by default', () => {
   assert.match(index, /=\s*\(\{\s*withAudio\s*=\s*false\s*\}\)/u);
   assert.match(index, /export const PLAN\s*=/u);
   const tokens = read('skills/ai-promo/templates/motion-pack/src/tokens.js');
-  for (const token of ['WIDTH = 1080', 'HEIGHT = 1920', 'FPS = 30']) assert.ok(tokens.includes(token), token);
+  for (const token of ["ASPECT = 'vertical'", 'FPS = 30']) assert.ok(tokens.includes(token), token);
+  // Размеры 1080×1920 и SAFE вертикали проверяет tests/motion-horizontal-docs.test.js на вычисленных токенах.
 });
 
 test('chrome text stays within 112 px by default and the font import survives the copy', () => {

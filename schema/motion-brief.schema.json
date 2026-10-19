@@ -127,7 +127,7 @@
       "additionalProperties": false,
       "required": ["aspect", "width", "height", "fps", "durationInFrames"],
       "properties": {
-        "aspect": { "const": "vertical" },
+        "aspect": { "enum": ["vertical", "horizontal"] },
         "width": { "type": "integer", "minimum": 1 },
         "height": { "type": "integer", "minimum": 1 },
         "fps": { "type": "number", "exclusiveMinimum": 0, "maximum": 120 },

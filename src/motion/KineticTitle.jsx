@@ -1,5 +1,5 @@
 import { useCurrentFrame, useVideoConfig } from 'remotion';
-import { SceneFrame, TextBox, useEntrance } from './parts';
+import { SceneFrame, TextBox, useEntrance, useMotionStage } from './parts';
 import { motionTheme as t, revealProgress } from './motion-theme';
 
 export const KineticTitle = ({ text, emphasis, caption, durationInFrames }) => {
@@ -11,8 +11,12 @@ export const KineticTitle = ({ text, emphasis, caption, durationInFrames }) => {
   const emphasisStart = emphasis ? text.indexOf(emphasis) : -1;
   let offset = 0;
   const line = useEntrance(durationInFrames, 1, 2);
+  const { horizontal } = useMotionStage();
+  // 16:9: заголовок крупно на всю ширину сцены; высота блока – под поле 16:9 с подписью.
+  const box = horizontal ? { height: 620, maxSize: 128 } : { height: 760, maxSize: 112 };
+  const layout = horizontal ? { 'data-motion-layout': 'horizontal' } : {};
   return <SceneFrame caption={caption}>
-    <TextBox text={text} height={760} maxSize={112} weight={750}>
+    <TextBox text={text} height={box.height} maxSize={box.maxSize} weight={750} {...layout}>
       {words.map((word, key) => {
         const begin = offset;
         offset += word.length;

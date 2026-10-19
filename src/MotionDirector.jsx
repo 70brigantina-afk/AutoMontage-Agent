@@ -11,9 +11,10 @@ import { MediaScene } from './motion/MediaScene';
 import { CtaScene } from './motion/CtaScene';
 import { motionTheme } from './motion/motion-theme';
 import { Drift, Grain, TextureContext } from './details/Texture.jsx';
+import { isDarkBackground } from './details/texture.js';
 import { TransitionSeries } from '@remotion/transitions';
 import {
-  contentFrameAt, getSceneTiming, hasSceneTransitions, planSceneTransitions, presentationFor,
+  backdropVisible, contentFrameAt, getSceneTiming, hasSceneTransitions, planSceneTransitions, presentationFor,
   sceneHold, transitionLead,
 } from './motion/transitions';
 
@@ -30,6 +31,14 @@ const sceneElement = (scene, durationInFrames) => {
   return <Component {...scene} durationInFrames={durationInFrames} />;
 };
 
+// Слои текстуры под сценами: subtle – дрейф фона, зерно только на тёмном фоне (на светлом его не
+// видно, а шум раздувает файл). frame – глобальный кадр для фона сцены, без него – текущий кадр.
+export const textureLayers = ({ texture, background = motionTheme.background, frame = null }) => {
+  if (texture !== 'subtle') return null;
+  const props = frame === null ? {} : { frame };
+  return <><Drift {...props} />{isDarkBackground(background) && <Grain {...props} />}</>;
+};
+
 // Режим переходов: TransitionSeries ставит сцены подряд, поэтому паузы между сценами и старт
 // первой сцены задаются offset. Содержимое сцены получает длительность из ТЗ (у push – плюс lead
 // кадров до start, анимация входа начинается в start - lead). Всё после живой части – хвост под
@@ -37,20 +46,25 @@ const sceneElement = (scene, durationInFrames) => {
 // звук клипа, поэтому видео не продолжается и не обрывается в пустоту.
 // Непрозрачный фон сцены в режиме переходов: тот же фон корня и та же текстура, что под сценами.
 // Входящая сцена закрывает уходящую целиком (wipe открывает новую сцену, а не просвет старой,
-// push не даёт двойной экспозиции). Текстура идёт от глобального кадра композиции, поэтому вне
-// перехода кадр совпадает с прежним, а зерно и дрейф не прыгают на границе сцен. Фон лежит вне
-// Freeze: стоп-кадр хвоста держит содержимое, но не текстуру.
-const sceneBackdrop = ({ texture, frame }) => (
-  <AbsoluteFill data-motion-scene-backdrop="true" style={{ background: motionTheme.background }}>
-    {texture === 'subtle' && <><Drift frame={frame} /><Grain frame={frame} /></>}
-  </AbsoluteFill>
-);
+// push не даёт двойной экспозиции), уходящая при slide и push не открывает просвет. Текстура идёт
+// от глобального кадра композиции, поэтому зерно и дрейф не прыгают на границе сцен. Фон лежит
+// вне Freeze: стоп-кадр хвоста держит содержимое, но не текстуру.
+// Фон есть только в кадрах перехода (backdropVisible по локальному кадру sequence): вне них сцена
+// не трансформирована, и слой корня под ней даёт тот же кадр, а лишняя копия текстуры – лишь
+// время рендера.
+export const SceneBackdrop = ({ texture, frame, enterFrames, exitFrames, durationInFrames }) => {
+  const local = useCurrentFrame();
+  if (!backdropVisible(local, { enterFrames, exitFrames, durationInFrames })) return null;
+  return <AbsoluteFill data-motion-scene-backdrop="true" style={{ background: motionTheme.background }}>
+    {textureLayers({ texture, background: motionTheme.background, frame })}
+  </AbsoluteFill>;
+};
 
 const renderSceneTransitions = ({ scenes, fps, width, height, texture, frame }) => {
   const plan = planSceneTransitions(scenes, fps);
   let cursor = 0;
   const items = [];
-  plan.forEach(({ index, from, durationInFrames, transition }) => {
+  plan.forEach(({ index, from, durationInFrames, transition }, position) => {
     const natural = cursor - (transition?.frames ?? 0);
     if (transition) {
       const { presentation, timing } = presentationFor(transition, { width, height });
@@ -63,7 +77,8 @@ const renderSceneTransitions = ({ scenes, fps, width, height, texture, frame }) 
       : sceneElement(scenes[index], liveFrames);
     items.push(<TransitionSeries.Sequence key={`s${index}`} name={`motion-scene-${index}`}
       offset={from - natural} durationInFrames={durationInFrames}>
-      {sceneBackdrop({ texture, frame })}
+      <SceneBackdrop texture={texture} frame={frame} durationInFrames={durationInFrames}
+        enterFrames={transition?.frames ?? 0} exitFrames={plan[position + 1]?.transition?.frames ?? 0} />
       <Freeze frame={freezeFrame} active={(frame) => contentFrameAt(frame, liveFrames) < frame}>
         {content}
       </Freeze>
@@ -83,8 +98,8 @@ export const MotionDirector = ({ theme = 'motion-neutral', scenes = [], audioSrc
   const texture = style?.texture === 'subtle' ? 'subtle' : 'none';
   return <AbsoluteFill style={{ background: motionTheme.background, fontFamily: motionTheme.fontFamily }}>
     <FontStyle />
-    {/* Дрейф и зерно лежат под сценами (раньше в DOM), поэтому контраст текста не падает. */}
-    {texture === 'subtle' && <><Drift /><Grain /></>}
+    {/* Дрейф (и зерно на тёмном фоне) лежат под сценами (раньше в DOM), поэтому контраст текста не падает. */}
+    {textureLayers({ texture, background: motionTheme.background })}
     {audioSrc && <Audio src={staticFile(audioSrc)} volume={(frame) => sourceVolumeForFrame({ frame, scenes: timedScenes, fps })} />}
     <TextureContext.Provider value={texture}>
     {hasSceneTransitions(scenes)
@@ -98,7 +113,7 @@ export const MotionDirector = ({ theme = 'motion-neutral', scenes = [], audioSrc
     {draftPreview && <div data-draft-preview-watermark="true" style={{ position: 'absolute',
       top: '5%', left: '7%', zIndex: 1000, padding: '10px 18px', borderRadius: 8,
       color: motionTheme.ink, background: motionTheme.panel, fontWeight: 800,
-      fontSize: width * 0.03, opacity: 0.8,
+      fontSize: Math.min(width, height) * 0.03, opacity: 0.8,
     }}>ЧЕРНОВИК</div>}
   </AbsoluteFill>;
 };

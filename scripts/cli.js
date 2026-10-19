@@ -20,6 +20,8 @@ function help() {
 Использование:
   automontage <видео.mp4> [опции]     смонтировать (результат в текущей папке)
   automontage motion <audio> --project <name>  создать motion-черновик
+  automontage motion <audio> --project <name> --aspect horizontal
+                                      горизонтальный ролик 16:9 (1920x1080); по умолчанию vertical 1080x1920
   automontage motion <audio> --project <name> --music-only
                                       motion без речи: аудио – готовый саундтрек, без Whisper
   automontage motion --help          motion из аудио или явная платная ElevenLabs-озвучка

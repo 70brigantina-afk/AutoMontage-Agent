@@ -6,6 +6,8 @@ export const motionTheme = Object.freeze({
 });
 
 // Durations are in seconds; scene-local frames are the only animation clock.
+// risePx – в пикселях сцены (короткая сторона 1080 в обеих сценах). SceneFrame масштабирует сцену
+// к кадру с k = min(width / stage.width, height / stage.height) (для точных 9:16 и 16:9 это min(width, height) / 1080), поэтому подъём в кадре равен risePx * k без пересчёта.
 export const motionPresets = Object.freeze({ entranceSec: 0.45, eventSec: 1.8, risePx: 24 });
 
 export const clamp01 = (value) => Math.max(0, Math.min(1, value));

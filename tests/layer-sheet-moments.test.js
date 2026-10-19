@@ -8,7 +8,7 @@ const { makeLayerProject } = require('./helpers/layer-project');
 const { manifestFixture } = require('./helpers/manifest-fixtures');
 const { writeProjectManifest } = require('../scripts/project/workspace');
 const { hashFile } = require('../scripts/pult/files');
-const { buildMomentSheet, run } = require('../scripts/layer/sheet');
+const { buildMomentSheet, frameFormat, phoneWidth, run } = require('../scripts/layer/sheet');
 
 const hasFfmpeg = toolAvailable('ffmpeg') && toolAvailable('ffprobe');
 
@@ -58,6 +58,7 @@ test('buildMomentSheet: кадры 720 px, лист 4 колонки, телеф
   assert.equal(result.gate.id, 'G12');
   const index = JSON.parse(fs.readFileSync(result.indexPath, 'utf8'));
   assert.equal(index.version, 1);
+  assert.deepEqual(index.format, { aspect: 'vertical', width: 540, height: 960 }, 'индекс несёт формат для критика');
   assert.equal(index.moments.length, 3);
   assert.deepEqual(Object.keys(index.moments[0]).sort(), ['file', 'kind', 'label', 'ref', 'timeSec']);
   assert.ok(!path.isAbsolute(index.moments[0].file));
@@ -121,4 +122,23 @@ test('моменты в последней доле секунды не выхо
   const result = buildMomentSheet({ videoPath: previewPath, width: 540, height: 960, duration: 4, fps: 25, moments, outDir, name: 'moments-end', log: () => {} });
   assert.equal(fs.readdirSync(result.framesDir).length, 2);
   for (const f of fs.readdirSync(result.framesDir)) assert.ok(fs.statSync(path.join(result.framesDir, f)).size > 0);
+});
+
+test('phoneWidth и frameFormat: вертикаль 360 px, горизонталь 640 px', () => {
+  assert.equal(phoneWidth(1080, 1920), 360);
+  assert.equal(phoneWidth(1920, 1080), 640);
+  assert.deepEqual(frameFormat(1080, 1920), { aspect: 'vertical', width: 1080, height: 1920 });
+  assert.deepEqual(frameFormat(1920, 1080), { aspect: 'horizontal', width: 1920, height: 1080 });
+});
+
+test('buildMomentSheet 16:9: телефонный лист 640 px на кадр и формат horizontal в индексе', { skip: !hasFfmpeg }, (t) => {
+  const { projectDir } = scaffold(t);
+  const video = path.join(projectDir, 'previews', 'wide.mp4');
+  runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=960x540:r=25:d=2', '-pix_fmt', 'yuv420p', video]);
+  const outDir = path.join(projectDir, 'qa');
+  fs.mkdirSync(outDir, { recursive: true });
+  const moments = [{ timeSec: 0.3, kind: 'event', ref: 'a', label: 'a' }, { timeSec: 1.5, kind: 'hold', ref: 'a', label: 'b' }];
+  const result = buildMomentSheet({ videoPath: video, width: 1920, height: 1080, duration: 2, fps: 25, moments, outDir, name: 'moments-wide', log: () => {} });
+  assert.equal(dims(result.phonePath).width, 640 * 4, 'телефонный лист 16:9: 4 колонки по 640 px');
+  assert.deepEqual(JSON.parse(fs.readFileSync(result.indexPath, 'utf8')).format, { aspect: 'horizontal', width: 1920, height: 1080 });
 });

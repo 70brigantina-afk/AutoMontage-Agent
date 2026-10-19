@@ -64,7 +64,8 @@ OAuth MCP пользователя, остальное работает лока
    кадре, саб-бумы и вжухи на склейках раскадровки, премикс, loudnorm −14 LUFS, обрезка до
    целых кадров ([audio-recipe.md](references/audio-recipe.md)). Собирай в `tmp/ai-promo/<slug>/`
    движка. Этот файл – источник ролика и задаёт `TOTAL` пакета.
-3. **Проект без речи.** `automontage motion tmp/ai-promo/<slug>/soundtrack.wav --project "<Название>" --music-only`:
+3. **Проект без речи.** `automontage motion tmp/ai-promo/<slug>/soundtrack.wav --project "<Название>" --music-only`
+   (горизонтальный ролик 16:9 – с `--aspect horizontal`, 1920×1080; по умолчанию вертикаль 1080×1920):
    Whisper не запускается, transcript пуст, scaffold brief с `audioRole: "music"`
    ([engine-path.md](references/engine-path.md)). С этого момента всё – в `projects/<id>/`.
    Источник и лицензию трека сразу запиши в `assets/ai/provenance.json`. Согласованную копию сохрани в `projects/<id>/copy.md`. CTA с кодовым словом или «напиши в
@@ -80,7 +81,7 @@ OAuth MCP пользователя, остальное работает лока
    кадры, затем клипы), либо один раз на весь план со сметой по партиям и общим потолком. Всё
    сверх утверждённой сметы – лишние варианты, повторы, новая партия, цена `get_cost` выше
    сметы – новый вопрос.
-6. **Ключевые кадры.** `nano_banana_pro`, 2k, 9:16, 2 варианта на кадр. Для героя – референсы
+6. **Ключевые кадры.** `nano_banana_pro`, 2k, 9:16 (для горизонтали 16:9), 2 варианта на кадр. Для героя – референсы
    из собственной записи автора. Скачай результаты в `projects/<id>/assets/ai/` и сразу дополни
    `provenance.json` ([provenance.md](references/provenance.md)).
 7. **Выбор кадров** ✋. Покажи варианты. Если пользователь заранее поручил выбор агенту, выбери
@@ -91,13 +92,15 @@ OAuth MCP пользователя, остальное работает лока
    У Veo-клипов есть свой звук – в пакете они всегда `muted`, а `media`-сцена – `audioMode: mute`.
 9. **Motion-пакет.** Скопируй [`templates/motion-pack/`](templates/motion-pack/README.md) в
    `projects/<id>/motion-vNN/`, положи клипы в `public/clips/`, `TOTAL` = `durationInFrames`
-   scaffold brief, замени заглушки текстом из `copy.md`, адаптируй ДНК дизайна. Эффекты и
+   scaffold brief, `ASPECT` = `output.aspect` ТЗ (шаблон вертикальный; для 16:9 поставь `'horizontal'` и
+   перекомпонуй сцены под 1920×1080, иначе клип обрежется), замени заглушки текстом из `copy.md`, адаптируй ДНК дизайна. Эффекты и
    правила стиля – [vfx-kit.md](references/vfx-kit.md). Контрольные кадры – `stills.cjs`.
-10. **Рендер пакета.** `node projects/<id>/motion-vNN/render.cjs`: ровно `durationInFrames`
+10. **Рендер пакета.** `node projects/<id>/motion-vNN/render.cjs --brief brief/vNN-draft.motion.json`
+    (флаг сверяет `ASPECT` с `output.aspect` ТЗ и останавливает рендер при расхождении): ровно `durationInFrames`
     кадров, `withAudio=false`, без звуковой дорожки. Скопируй рендер в `assets/`, посчитай SHA-256.
 11. **Media-сцена.** Draft brief: одна `media`-сцена `start 0`, `end` = длительность,
-    `fit: cover`, `audioMode: mute`, `frame: "full"` (клип на весь кадр 1080×1920 без рамки и
-    зума сцены); публикация через `publishBriefRevision`. `brief.music`
+    `fit: cover`, `audioMode: mute`, `frame: "full"` (клип на весь кадр 1080×1920, у горизонтали
+    1920×1080, без рамки и зума сцены); публикация через `publishBriefRevision`. `brief.music`
     для music-only запрещён: вся музыка уже в источнике.
     **Цикл критика** (до рендера preview). Кадры рисуются прямо из композиции черновика ТЗ, без
     рендера preview: `automontage layer sheet --mode moments --project-dir projects/<id>` кладёт кадры
@@ -134,7 +137,7 @@ OAuth MCP пользователя, остальное работает лока
     Только при явном «утверждаю» в чате сначала
     `node scripts/project/approve-brief.js projects/<id> brief/vNN-draft.motion.json --confirm-preview-viewed`,
     затем та же команда final, если `approve-brief.js` не напечатал `final: …`.
-16. **QA final** по тому же чек-листу: H.264/AAC, 1080×1920, 30 FPS, −14±1 LUFS, TP ≤ −1,5 dBTP,
+16. **QA final** по тому же чек-листу: H.264/AAC, 1080×1920 (горизонталь 1920×1080), 30 FPS, −14±1 LUFS, TP ≤ −1,5 dBTP,
     без watermark `ЧЕРНОВИК`. Отдай путь к `final/<slug>.mp4`, длительность, итог QA и потраченные кредиты.
 17. **Чистка** – всегда после финала и QA: `automontage clean --project <id> --level archive` без
     `--yes`, покажи ГБ и список файлов. Команду с `--yes` – только после явного «да» пользователя

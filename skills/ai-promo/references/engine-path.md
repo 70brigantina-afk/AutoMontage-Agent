@@ -15,6 +15,7 @@
 
 ```bash
 automontage motion tmp/ai-promo/<slug>/soundtrack.wav --project "Промо <продукт>" --music-only
+# горизонтальный ролик 16:9 (1920×1080) – добавь --aspect horizontal; без флага вертикаль 1080×1920
 ```
 
 - Whisper не запускается, `transcript/words.json` = `[]`, scaffold brief получает
@@ -45,15 +46,19 @@ node -e "const m=require('./projects/<id>/brief/v01-draft.motion.json');console.
 `ceil(длительность саундтрека × 30)`. Сумма сцен `PLAN` в `index.jsx` обязана закончиться
 ровно на `TOTAL` (пакет сам проверяет это при рендере).
 
+`ASPECT` в `tokens.js` = `output.aspect` ТЗ. Шаблон вертикальный (сцены скомпонованы под 1080×1920):
+для 16:9 поставь `'horizontal'` и перекомпонуй сцены, иначе `fit: cover` обрежет вертикальный
+клип примерно до трети высоты. Рендер с `--brief` проверяет это за тебя.
+
 ## 3. Рендер пакета
 
 ```bash
 node projects/<id>/motion-vNN/stills.cjs 0 90 300 600      # контрольные кадры, каждый < TOTAL
-node projects/<id>/motion-vNN/render.cjs                    # полный рендер без звука
+node projects/<id>/motion-vNN/render.cjs --brief projects/<id>/brief/vNN-draft.motion.json   # полный рендер без звука
 ```
 
 `render.cjs` ждёт слот общей очереди, рендерит композицию `Promo` с `withAudio=false` и
-`--muted`, проверяет 1080×1920, 30 FPS, отсутствие звуковой дорожки и число кадров = `TOTAL`.
+`--muted`, проверяет 1080×1920 (у горизонтали 1920×1080), 30 FPS, отсутствие звуковой дорожки и число кадров = `TOTAL`.
 Результат – `motion-vNN/renders/promo-NN.mp4`. Скопируй его в ассеты и посчитай хэш:
 
 ```bash
@@ -85,7 +90,7 @@ shasum -a 256 projects/<id>/assets/promo-pack-v01.mp4    # Linux: sha256sum
 }
 ```
 
-`"frame": "full"` обязателен: клип идёт на весь кадр 1080×1920 без рамки и зума сцены, как его
+`"frame": "full"` обязателен: клип идёт на весь кадр 1080×1920 (горизонталь 16:9 – 1920×1080) без рамки и зума сцены, как его
 отрендерил пакет. Без поля (`"card"`) движок положит пакет в карточку сцены. У `full` нет места
 для `overlayText` и `caption`: все надписи уже внутри пакета. `end` = `durationInFrames / 30`. Удобно резать саундтрек на длину, кратную 0,1 с (число кадров
 кратно 3), тогда `end` – точная десятичная граница кадра. Публикация:

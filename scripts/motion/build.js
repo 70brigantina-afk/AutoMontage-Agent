@@ -21,7 +21,7 @@ function parseMotionOptions(argv) {
   const options = {};
   const flags = new Map([['--project', 'project'], ['--project-dir', 'projectDir'], ['--brief', 'briefPath'],
     ['--version-label', 'versionLabel'], ['--model', 'model'], ['--script', 'scriptPath'],
-    ['--voice', 'voice'], ['--voice-id', 'voiceId']]);
+    ['--voice', 'voice'], ['--voice-id', 'voiceId'], ['--aspect', 'aspect']]);
   const seen = new Set();
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -38,6 +38,16 @@ function parseMotionOptions(argv) {
     const value = argv[++index];
     if (!value || value.startsWith('--')) throw new Error(`${arg} requires a value`);
     options[key] = value;
+  }
+  if (options.aspect !== undefined) {
+    if (!['vertical', 'horizontal'].includes(options.aspect)) {
+      const error = new Error(`--aspect: неизвестное значение "${options.aspect}", допустимо vertical или horizontal`);
+      error.exitCode = 2;
+      throw error;
+    }
+    if (options.briefPath || options.scriptPath) {
+      throw new Error('--aspect задаётся только при создании черновика из <audio> или --project-dir; в утверждённом ТЗ формат уже зафиксирован');
+    }
   }
   if (options.musicOnly && ['model', 'briefPath', 'versionLabel', 'scriptPath', 'voice', 'voiceId', 'acceptProviderCost']
     .some(key => options[key] !== undefined)) {
@@ -166,7 +176,9 @@ function runMotion(options, dependencies = {}) {
     const brief = { version: 1, kind: 'motion-reel', status: 'draft', source: workspace.manifest.source.localPath,
       ...(options.musicOnly ? { audioRole: 'music' } : {}),
       theme: 'motion-neutral', title: workspace.manifest.name.slice(0, 120),
-      output: { aspect: 'vertical', width: 1080, height: 1920, fps: 30, durationInFrames },
+      output: options.aspect === 'horizontal'
+        ? { aspect: 'horizontal', width: 1920, height: 1080, fps: 30, durationInFrames }
+        : { aspect: 'vertical', width: 1080, height: 1920, fps: 30, durationInFrames },
       scenes: [{ scene: 'kinetic-title', start: 0, end: durationInFrames / 30, text }],
     };
     dependencies.narrationGuard?.assertCurrent();
@@ -284,7 +296,7 @@ async function runScriptMotion(options, dependencies) {
 
 async function main(argv = process.argv.slice(2)) {
   if (argv.length === 1 && ['--help', '-h'].includes(argv[0])) {
-    console.log('automontage motion <audio> --project <name> [--model <Whisper model>]\nautomontage motion --script <file.txt> --voice elevenlabs --project <name> [--voice-id <voice-id>] --accept-provider-cost\n  ElevenLabs is a separate paid API; private ELEVENLABS_API_KEY and voice ID required.\nautomontage motion <audio> --project <name> --music-only\nautomontage motion --project-dir <dir> --music-only\n  Voiceless reel: the audio is the final premixed soundtrack; no Whisper, empty transcript, brief audioRole music.\nautomontage motion --project-dir <dir> --brief <approved.json> [--version-label <label>]\nLocal narration → transcript/scaffold → preview → explicit approval → final.');
+    console.log('automontage motion <audio> --project <name> [--model <Whisper model>] [--aspect vertical|horizontal]\nautomontage motion --script <file.txt> --voice elevenlabs --project <name> [--voice-id <voice-id>] --accept-provider-cost\n  ElevenLabs is a separate paid API; private ELEVENLABS_API_KEY and voice ID required.\nautomontage motion <audio> --project <name> --music-only [--aspect vertical|horizontal]\nautomontage motion --project-dir <dir> --music-only\n  Voiceless reel: the audio is the final premixed soundtrack; no Whisper, empty transcript, brief audioRole music.\nautomontage motion --project-dir <dir> --brief <approved.json> [--version-label <label>]\nLocal narration → transcript/scaffold → preview → explicit approval → final.');
     return;
   }
   try {
@@ -296,7 +308,7 @@ async function main(argv = process.argv.slice(2)) {
     console.log(result.action === 'draft' ? `Motion draft scaffold: ${result.jsonPath}\n${next}` : `Motion final: ${result.finalPath}`);
     // #113: после финала – сколько места освободит чистка этого ролика (без удаления).
     if (result.action === 'render') printCleanupHint(result.projectDir);
-  } catch (error) { console.error(`Motion cancelled: ${error.message}`); process.exitCode = 1; }
+  } catch (error) { console.error(`Motion cancelled: ${error.message}`); process.exitCode = error.exitCode || 1; }
 }
 if (require.main === module) main();
 module.exports = { parseMotionOptions, resumeDir, runMotion, main };

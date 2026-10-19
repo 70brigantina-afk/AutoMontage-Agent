@@ -44,7 +44,7 @@ function realGates({ rate = 48000, stderr = summary('-14.1', '-1.7') } = {}, see
         seen.push({ command, args });
         if (command === 'ffprobe') {
           return { stdout: JSON.stringify({ streams: [
-            { codec_type: 'video', width: input.expected.width, height: input.expected.height, avg_frame_rate: '30/1', duration: '2.000000' },
+            { codec_type: 'video', width: input.expected.width, height: input.expected.height, avg_frame_rate: '30/1', duration: '2.000000', bit_rate: '900000' },
             { codec_type: 'audio', sample_rate: String(rate), duration: '2.000000' }], format: { duration: '2.000000' } }), stderr: '' };
         }
         return { stdout: '', stderr };

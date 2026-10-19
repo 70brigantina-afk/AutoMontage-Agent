@@ -19,6 +19,9 @@
 `title`, `output`, `scenes`. `source` равен `manifest.source.localPath`, обычно
 `input/narration.wav`. Используй `theme: "motion-neutral"`, `output.aspect: "vertical"`,
 1080×1920/30 и фактическую длительность `ceil(audioDurationSec * fps)` в кадрах.
+Горизонтальный ролик 16:9: `output.aspect: "horizontal"` и `output.width`/`output.height` = 1920×1080
+(`automontage motion --aspect horizontal` пишет их сам; валидатор отклоняет horizontal с шириной не
+больше высоты и vertical наоборот). Остальные поля те же.
 У каждого scene только разрешённые схемой свойства; все поля проверяются строго.
 
 Необязательное `audioRole: "narration" | "music"` задаёт роль исходного аудио. Без поля –
@@ -46,8 +49,9 @@
 дословно из речи или утверждённого ТЗ. Рилс держи в 6 столбиках и меньше, акцент (`highlight`)
 ставь на одну точку.
 
-Необязательное `style.texture` в корне brief: `none` (по умолчанию) или `subtle` (зерно, дрейф
-фона и блик на входе карточки под текстом). Для новых ТЗ ставь `subtle`.
+Необязательное `style.texture` в корне brief: `none` (по умолчанию) или `subtle` (дрейф фона и
+блик на входе карточки под текстом; неподвижное зерно – только на тёмном фоне, на светлой теме его
+нет: невидимый шум лишь раздувает файл). Для новых ТЗ ставь `subtle`.
 
 Optional `caption` ≤160. Верхние ограничения не цель: оставляй время на чтение.
 `media.kind` – `image` или `video`; `fit` – `contain` или `cover`. У video допустимы

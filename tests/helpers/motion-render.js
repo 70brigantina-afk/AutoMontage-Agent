@@ -4,7 +4,11 @@ const React = require('react');
 const { buildSync } = require('esbuild');
 const remotion = require('remotion');
 
-function loadMotion(relativePath, overrides = {}) {
+// Размер кадра для тестов: по умолчанию прежняя вертикаль 1080×1920, горизонталь 16:9 – явно.
+const VERTICAL_SIZE = Object.freeze({ aspect: 'vertical', width: 1080, height: 1920 });
+const HORIZONTAL_SIZE = Object.freeze({ aspect: 'horizontal', width: 1920, height: 1080 });
+
+function loadMotion(relativePath, overrides = {}, size = VERTICAL_SIZE) {
   const filename = path.join(__dirname, '../..', relativePath);
   const output = buildSync({
     entryPoints: [filename], bundle: true, platform: 'node', format: 'cjs', write: false,
@@ -20,7 +24,7 @@ function loadMotion(relativePath, overrides = {}) {
     Sequence: 'sequence', Audio: 'audio', OffthreadVideo: 'video', Img: 'img',
     staticFile: (src) => `/static/${src}`,
     useCurrentFrame: () => 89,
-    useVideoConfig: () => ({ width: 1080, height: 1920, fps: 30, durationInFrames: 630 }),
+    useVideoConfig: () => ({ width: size.width, height: size.height, fps: 30, durationInFrames: 630 }),
     ...overrides,
   } : require(request);
   compiled._compile(output, filename);
@@ -39,13 +43,13 @@ const scenes = [
   { scene: 'chart', title: dense(80), chartType: 'bar-to-line', unit: dense(16), highlight: 7,
     points: Array.from({ length: 8 }, (_, index) => ({ label: dense(24), value: (index + 1) * 123456 })) },
 ].map((scene, index) => ({ ...scene, start: index * 3, end: (index + 1) * 3 }));
-function brief(overrides = {}) {
+function brief(overrides = {}, size = VERTICAL_SIZE) {
   return {
     version: 1, kind: 'motion-reel', status: 'approved', source: 'input/narration.wav',
     approval: { draftSha256: 'a'.repeat(64), sourceSha256: 'b'.repeat(64), previewSha256: 'c'.repeat(64), confirmedAt: '2026-09-08T10:00:00.000Z' },
     theme: 'motion-neutral', title: 'Общедоступные сцены',
-    output: { aspect: 'vertical', width: 1080, height: 1920, fps: 30, durationInFrames: 720 },
+    output: { aspect: size.aspect, width: size.width, height: size.height, fps: 30, durationInFrames: 720 },
     scenes, ...overrides,
   };
 }
-module.exports = { loadMotion, dense, scenes, brief };
+module.exports = { loadMotion, dense, scenes, brief, VERTICAL_SIZE, HORIZONTAL_SIZE };

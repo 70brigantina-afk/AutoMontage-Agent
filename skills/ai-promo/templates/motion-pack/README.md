@@ -1,6 +1,6 @@
 # Шаблон motion-пакета AI-промо
 
-Project-local Remotion-пакет на 1080×1920, 30 FPS: 3 AI-кадра + 4 собственные сцены с VFX.
+Project-local Remotion-пакет на 1080×1920 (вертикаль по умолчанию) или 1920×1080 (горизонталь 16:9), 30 FPS: 3 AI-кадра + 4 собственные сцены с VFX.
 Рендерится без звука ровно на `durationInFrames` brief и подключается одной `media`-сценой.
 
 ## Копирование
@@ -24,7 +24,7 @@ cp projects/<id>/input/narration.wav projects/<id>/motion-vNN/public/audio.wav  
 
 | Файл | Что внутри |
 |---|---|
-| `src/tokens.js` | `TOTAL`, FPS, размер, палитра, шрифты, `CHROME_MAX`, safe zone |
+| `src/tokens.js` | `TOTAL`, FPS, `ASPECT` и размер, палитра, шрифты, `CHROME_MAX`, safe zone |
 | `src/fx.jsx` | Эффекты: Shake, Flash, Shockwave, Sparks, Embers, Letterbox, Flare, Chrome, Slam, BlurPass |
 | `src/scenes.jsx` | Сцены: Forge, Shot, Holo, EnergyButton, Phone, Finale |
 | `src/index.jsx` | `PLAN` сцен (длительность каждой в кадрах), композиция `Promo`, `defaultProps {withAudio:false}` |
@@ -33,7 +33,10 @@ cp projects/<id>/input/narration.wav projects/<id>/motion-vNN/public/audio.wav  
 
 ## Настройка
 
-1. `TOTAL` в `tokens.js` = `output.durationInFrames` scaffold brief проекта.
+1. `TOTAL` в `tokens.js` = `output.durationInFrames` scaffold brief проекта. `ASPECT` = `output.aspect`
+   brief: `vertical` (1080×1920, safe-зона 260…1500) или `horizontal` (1920×1080, поля 60 сверху и снизу и
+   80 по бокам, как `SAFE_16x9` движка). Размер и safe zone считаются из `ASPECT`; сцены шаблона
+   нарисованы под вертикаль, для 16:9 перекомпонуй их под широкий кадр.
 2. `PLAN` в `index.jsx`: у каждой сцены только `dur` в кадрах. Начало сцены – сумма `dur`
    предыдущих, сумма всех `dur` обязана равняться `TOTAL` (иначе рендер падает с понятной
    ошибкой). Склейки ставь на удары саундтрека, первый большой AI-кадр – на дроп.
@@ -52,6 +55,7 @@ cp projects/<id>/input/narration.wav projects/<id>/motion-vNN/public/audio.wav  
 ```bash
 node projects/<id>/motion-vNN/stills.cjs 84 150 260     # PNG в projects/<id>/motion-vNN/out/stills/
 node projects/<id>/motion-vNN/render.cjs                # renders/promo-NN.mp4, без звука
+node projects/<id>/motion-vNN/render.cjs --aspect horizontal   # то же, с проверкой формата tokens.js
 npx --no-install remotion --env-file=config/remotion-public.env studio projects/<id>/motion-vNN/src/index.jsx \
   --public-dir projects/<id>/motion-vNN/public
 ```
