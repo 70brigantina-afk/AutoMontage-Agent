@@ -281,7 +281,7 @@ async function renderMomentStills({ target, moments, outDir, name, sha = inputsS
     const indexPath = path.join(outDir, `${name}.json`);
     const identity = target.kind === 'layer' ? { kind: 'layer', layer: target.layerName }
       : { kind: target.kind, briefSha256: target.briefSha256 };
-    writeJson(indexPath, { version: 1, source: 'stills', inputsSha256: sha, ...identity, moments: entries });
+    writeJson(indexPath, { version: 1, source: 'stills', format: sheet.frameFormat(target.width, target.height), inputsSha256: sha, ...identity, moments: entries });
     log(`кадров для критика: ${entries.length}`);
     return { framesDir, sheetPath, phonePath, indexPath, inputsSha256: sha, gate: emptyFrameGate(samples) };
   } finally {

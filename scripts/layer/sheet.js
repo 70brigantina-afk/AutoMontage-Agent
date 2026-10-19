@@ -21,9 +21,14 @@ const MODES = ['even', 'moments'];
 // preview – из готового preview (прежнее поведение).
 const SOURCES = ['stills', 'preview'];
 
-// Кадр для критика: длинная сторона 720 px; телефонная копия листа – кадр шириной 360 px.
+// Кадр для критика: длинная сторона 720 px; телефонная копия листа – кадр шириной 360 px у вертикали
+// и 640 px у горизонтали (16:9 при 360 px давал бы строку мельче, чем на реальном экране).
 const CRITIC_LONG_SIDE = 720;
 const PHONE_WIDTH = 360;
+const PHONE_WIDTH_HORIZONTAL = 640;
+const phoneWidth = (width, height) => (height > width ? PHONE_WIDTH : PHONE_WIDTH_HORIZONTAL);
+// Формат кадра для индекса: критик узнаёт из него, вертикаль перед ним или горизонталь.
+const frameFormat = (width, height) => ({ aspect: height > width ? 'vertical' : 'horizontal', width, height });
 const SHEET_COLUMNS = 4;
 const QUIET = ['-hide_banner', '-loglevel', 'error', '-y'];
 
@@ -176,7 +181,7 @@ function buildSheet({ videoPath, width, height, duration, fps, outDir, name, com
 // Плитка листа моментов из готовых кадров критика – общая для обоих источников (кадры из preview
 // и кадры из композиции, scripts/qa/moment-stills.js). frames – [{file}] по порядку, кадры одной
 // величины с пропорциями width×height (любого масштаба). На каждый кадр один ffmpeg даёт миниатюру с
-// рамкой safe-зоны и телефонную копию шириной 360 px; затем листы по SHEET_COLUMNS колонок.
+// рамкой safe-зоны и телефонную копию шириной 360 px (640 px у горизонтали); затем листы по SHEET_COLUMNS колонок.
 function tileMomentFrames(frames, { outDir, name, width, height }) {
   const { thumbW, box } = thumbBox(width, height);
   const work = path.join(outDir, `${name}.tiles-${process.pid}-${crypto.randomBytes(4).toString('hex')}`);
@@ -188,7 +193,7 @@ function tileMomentFrames(frames, { outDir, name, width, height }) {
       const n = String(i + 1).padStart(2, '0');
       const sheetFrame = path.join(work, 'sheet', `f${n}.png`);
       const phoneFrame = path.join(work, 'phone', `f${n}.png`);
-      const graph = `[0:v]split=2[a][b];[a]scale=${thumbW}:-2,${drawbox}[o1];[b]scale=${PHONE_WIDTH}:-2[o2]`;
+      const graph = `[0:v]split=2[a][b];[a]scale=${thumbW}:-2,${drawbox}[o1];[b]scale=${phoneWidth(width, height)}:-2[o2]`;
       runTool('ffmpeg', [...QUIET, '-i', file, '-filter_complex', graph,
         '-map', '[o1]', '-frames:v', '1', sheetFrame, '-map', '[o2]', '-frames:v', '1', phoneFrame], { stage: 'moment tile frame' });
       if (![sheetFrame, phoneFrame].every((f) => fs.statSync(f, { throwIfNoEntry: false })?.size)) {
@@ -230,7 +235,7 @@ function buildMomentSheet({ videoPath, width, height, duration, fps, moments, ou
   });
   const { sheetPath, phonePath } = tileMomentFrames(frames, { outDir, name, width, height });
   const indexPath = path.join(outDir, `${name}.json`);
-  writeJson(indexPath, { version: 1, source: 'preview', previewSha256, moments: entries });
+  writeJson(indexPath, { version: 1, source: 'preview', format: frameFormat(width, height), previewSha256, moments: entries });
   const samples = moments.map((moment) => {
     const t = clampSeek(moment.timeSec);
     const edgeShare = frameEdgeShare(videoPath, t);
@@ -392,4 +397,4 @@ async function run(options, deps = {}) {
   return 0;
 }
 
-module.exports = { FLAGS, buildMomentSheet, buildSheet, frameEdgeShare, frameStats, run, sheetTimes, thumbBox, tileMomentFrames };
+module.exports = { FLAGS, buildMomentSheet, buildSheet, frameEdgeShare, frameFormat, frameStats, phoneWidth, run, sheetTimes, thumbBox, tileMomentFrames };

@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Добавлено
+
+- Горизонтальные motion-ролики 16:9: `automontage motion --aspect horizontal` (в том числе с
+  `--music-only`) создаёт черновик 1920×1080 с `output.aspect: "horizontal"`; валидатор ТЗ сверяет
+  `aspect` с размером кадра. `MotionReel` выбирает сцену (`MOTION_STAGES`, `useMotionStage()`) по
+  реальному кадру, `SceneFrame` масштабирует её, все восемь сцен имеют горизонтальную раскладку в
+  safe-зоне `SAFE_16x9`; карточка `media` в 16:9 всегда вписывает видео (`contain`), вертикаль не
+  изменилась. Телефонный лист критика у горизонтали – 640 px на кадр (у вертикали 360 px), формат
+  записан в индексе кадров. Пакет `ai-promo` и навыки `motion-reel`/`ai-promo` описывают 16:9:
+  `ASPECT` в `tokens.js`, `render.cjs --aspect`, кадры Higgsfield 16:9.
+
 ### Исправлено
 
 - Motion-reel, `style.texture: subtle`: зерно больше не меняется каждые 2 кадра – оно неподвижно и

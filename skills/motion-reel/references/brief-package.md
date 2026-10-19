@@ -19,6 +19,9 @@
 `title`, `output`, `scenes`. `source` равен `manifest.source.localPath`, обычно
 `input/narration.wav`. Используй `theme: "motion-neutral"`, `output.aspect: "vertical"`,
 1080×1920/30 и фактическую длительность `ceil(audioDurationSec * fps)` в кадрах.
+Горизонтальный ролик 16:9: `output.aspect: "horizontal"` и `output.width`/`output.height` = 1920×1080
+(`automontage motion --aspect horizontal` пишет их сам; валидатор отклоняет horizontal с шириной не
+больше высоты и vertical наоборот). Остальные поля те же.
 У каждого scene только разрешённые схемой свойства; все поля проверяются строго.
 
 Необязательное `audioRole: "narration" | "music"` задаёт роль исходного аудио. Без поля –

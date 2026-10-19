@@ -17,8 +17,8 @@ true peak ≤ −1,5 dBTP; только на полном preview, у фрагм
 ffprobe -v error -show_entries stream=codec_type,codec_name,width,height,r_frame_rate,nb_frames,sample_rate,channels,duration:format=duration -of json <файл>.mp4
 ```
 
-- Пакет: 1080×1920, 30/1 FPS, число кадров = `durationInFrames` brief, звуковой дорожки нет.
-- Preview и final: 1080×1920, 30 FPS, H.264 + AAC, один аудиопоток `sample_rate` = 48000,
+- Пакет: 1080×1920 (горизонталь 16:9 – 1920×1080), 30/1 FPS, число кадров = `durationInFrames` brief, звуковой дорожки нет.
+- Preview и final: 1080×1920 (горизонталь – 1920×1080, `output.aspect` brief), 30 FPS, H.264 + AAC, один аудиопоток `sample_rate` = 48000,
   длительность = brief. У preview это уже проверил барьер; ffprobe нужен для пакета и final.
 - Саундтрек проекта (`input/narration.wav`): `sample_rate` = 48000, `duration_ts` = кадры × 1600
   ([audio-recipe.md](audio-recipe.md)).

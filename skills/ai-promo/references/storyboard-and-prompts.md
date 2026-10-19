@@ -23,7 +23,7 @@
 Ключевой кадр (image):
 
 ```text
-Cinematic vertical 9:16 film still, <сцена: кто, что делает, где>, <свет: dramatic rim light,
+Cinematic vertical 9:16 film still (для горизонтали: horizontal 16:9 film still), <сцена: кто, что делает, где>, <свет: dramatic rim light,
 volumetric haze>, <палитра: molten gold and cold cyan>, shallow depth of field, 35mm anamorphic,
 high detail. No text, no letters, no logos, no watermark, vertical composition, subject centered
 in the middle third.
@@ -44,6 +44,11 @@ impact, cinematic motion blur. Keep the face and composition from the start fram
 no logos, no new people.
 ```
 
+Формат кадров следует формату ролика: вертикаль 9:16 (1080×1920) по умолчанию, горизонталь 16:9 (1920×1080)
+при `--aspect horizontal`; в обоих промптах меняй слова «vertical 9:16» на «horizontal 16:9» и композицию
+(«subject centered in the middle third» – для вертикали; для горизонтали держи героя в центральной трети
+по ширине).
+
 Правила:
 
 - одна сцена – одно действие; длинные списки движений дают кашу;
@@ -60,7 +65,7 @@ no logos, no new people.
 
 | Задача | Модель и параметры | ≈ кредиты |
 |---|---|---|
-| Ключевой кадр | `nano_banana_pro`, 2k, 9:16 | ≈2 за изображение |
+| Ключевой кадр | `nano_banana_pro`, 2k, 9:16 (16:9 для горизонтали) | ≈2 за изображение |
 | Клип | `veo3_1`, high, 6 с | ≈24 |
 | Клип | `kling3_0`, pro, 5 с | ≈7,5 |
 

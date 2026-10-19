@@ -116,6 +116,7 @@ test('renderMomentStills: 3 момента – 3 кадра, один бандл
   assert.match(fs.readdirSync(result.framesDir).sort()[0], /^01-0\.3\.jpg$/u);
   const index = JSON.parse(fs.readFileSync(result.indexPath, 'utf8'));
   assert.equal(index.source, 'stills');
+  assert.deepEqual(index.format, { aspect: 'vertical', width: 1080, height: 1920 }, 'индекс несёт формат для критика');
   assert.equal(index.inputsSha256, inputsSha256(target));
   assert.equal(result.inputsSha256, index.inputsSha256);
   assert.equal(index.moments.length, 3);
@@ -497,4 +498,19 @@ test('real Remotion: кадры моментов шаблона слоя 405×72
       path.join(result.framesDir, frame)], { encoding: 'utf8' }).trim();
     assert.equal(size, '405,720');
   }
+});
+
+test('renderMomentStills: горизонтальная цель – формат horizontal в индексе, плитке отдан размер 1920x1080', async (t) => {
+  const root = tmp(t);
+  const target = { ...layerTarget(root), width: 1920, height: 1080 };
+  const { deps } = stubs();
+  let tiled = null;
+  const tile = (frames, opts) => {
+    tiled = opts;
+    return { sheetPath: 's.jpg', phonePath: 'p.jpg' };
+  };
+  const result = await renderMomentStills({ target, moments, outDir: path.join(root, 'qa'), name: 'moments-stills-h', log: () => {} }, { ...deps, tile });
+  assert.deepEqual(JSON.parse(fs.readFileSync(result.indexPath, 'utf8')).format, { aspect: 'horizontal', width: 1920, height: 1080 });
+  assert.equal(tiled.width, 1920);
+  assert.equal(tiled.height, 1080);
 });

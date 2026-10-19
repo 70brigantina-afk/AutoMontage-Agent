@@ -2,7 +2,8 @@
 // Полный рендер пакета без звука: node projects/<id>/motion-vNN/render.cjs (из корня движка).
 // Ждёт слот общей очереди тяжёлых задач, рендерит композицию Promo с withAudio=false и --muted
 // в renders/promo-NN.mp4 (NN – следующий свободный номер), затем проверяет размер, FPS,
-// отсутствие звука и число кадров = TOTAL из src/tokens.js.
+// отсутствие звука и число кадров = TOTAL из src/tokens.js. `--aspect vertical|horizontal` сверяет
+// выбранный формат с ASPECT в tokens.js до рендера; без флага берётся формат tokens.js.
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
@@ -46,8 +47,24 @@ function probe(file) {
   return JSON.parse(result.stdout).streams || [];
 }
 
+function requestedAspect(argv) {
+  const at = argv.indexOf('--aspect');
+  if (at === -1) return null;
+  const value = argv[at + 1];
+  if (value !== 'vertical' && value !== 'horizontal') throw new Error('--aspect: допустимо vertical или horizontal');
+  return value;
+}
+
 async function main() {
   const tokens = readTokens();
+  const aspect = requestedAspect(process.argv.slice(2));
+  if (aspect && aspect !== tokens.ASPECT) {
+    throw new Error(`--aspect ${aspect}, а в src/tokens.js ASPECT = '${tokens.ASPECT}': поправь tokens.js под формат scaffold brief`);
+  }
+  const [expectWidth, expectHeight] = tokens.ASPECT === 'horizontal' ? [1920, 1080] : [1080, 1920];
+  if (tokens.WIDTH !== expectWidth || tokens.HEIGHT !== expectHeight) {
+    throw new Error(`tokens.js: размер ${tokens.WIDTH}×${tokens.HEIGHT} не совпадает с ASPECT = '${tokens.ASPECT}' (${expectWidth}×${expectHeight})`);
+  }
   const output = nextOutput(path.join(PACK, 'renders'));
   const remotion = resolveRemotionCommand(ROOT);
   const slot = await acquireHeavySlot({ label: `ai-promo render ${path.basename(path.dirname(PACK))}/${path.basename(PACK)}` });
