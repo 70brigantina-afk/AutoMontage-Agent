@@ -320,3 +320,10 @@ test('real render: Grain on a dark background is static between frames 10 and 40
   assert.ok(a.equals(b), 'зерно не меняется между кадрами');
   assert.ok(!a.equals(plain), 'зерно нарисовано');
 });
+
+test('isDarkBackground: полупрозрачный rgba не считается тёмным, непрозрачный – по яркости', () => {
+  const { isDarkBackground } = math();
+  assert.equal(isDarkBackground('rgba(0,0,0,0.1)'), false);
+  assert.equal(isDarkBackground('rgba(0, 0, 0, 1)'), true);
+  assert.equal(isDarkBackground('rgba(255,255,255,1)'), false);
+});

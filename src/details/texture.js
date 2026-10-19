@@ -36,7 +36,9 @@ const parseColor = (color) => {
   if (match) return [...match[1]].map((c) => parseInt(c + c, 16));
   match = /^#([0-9a-f]{6})$/i.exec(value);
   if (match) return [0, 2, 4].map((i) => parseInt(match[1].slice(i, i + 2), 16));
-  match = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*[\d.]+\s*)?\)$/i.exec(value);
+  match = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*([\d.]+)\s*)?\)$/i.exec(value);
+  // Полупрозрачный цвет лежит поверх неизвестного фона: тёмным его не считаем.
+  if (match && match[4] !== undefined && Number(match[4]) < 1) return null;
   if (match) return match.slice(1, 4).map(Number).map((c) => Math.min(255, c));
   return null;
 };

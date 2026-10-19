@@ -273,7 +273,9 @@ function reportLabel(range) {
 
 function formatMotionReport(result) {
   const icons = { pass: '✅', fail: '❌', skipped: '⏭️', warn: '⚠️' };
-  const lines = [`Проверки motion-preview: ${result.block ? 'СТОП – preview не опубликован' : 'всё хорошо'}`];
+  const warned = result.checks.some((item) => item.status === 'warn');
+  const verdict = result.block ? 'СТОП – preview не опубликован' : warned ? 'опубликован, есть предупреждения' : 'всё хорошо';
+  const lines = [`Проверки motion-preview: ${verdict}`];
   for (const item of result.checks) {
     const scalar = item.measured !== null && typeof item.measured !== 'object' ? ` (${item.measured})` : '';
     lines.push(`${icons[item.status]} ${item.id}${scalar}: ${item.message}`);

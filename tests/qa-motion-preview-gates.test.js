@@ -322,7 +322,7 @@ test('video-bitrate: 23 Mbit/s at 1080x1920 30 fps warns but never blocks', () =
   assert.match(item.message, /зерно/);
   assert.match(item.message, /тяж[её]л/);
   assert.match(formatMotionReport(result), /⚠️ video-bitrate/);
-  assert.match(formatMotionReport(result), /всё хорошо/);
+  assert.match(formatMotionReport(result), /опубликован, есть предупреждения/);
 });
 
 test('video-bitrate: 2 Mbit/s passes; the limit scales with pixel area and fps', () => {
