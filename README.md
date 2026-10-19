@@ -252,7 +252,7 @@ automontage preview --project-dir projects/motion-demo --brief brief/v01-draft.m
 node scripts/qa-preview.js --project-dir projects/motion-demo
 ```
 
-Из checkout вместо `automontage` можно писать `node scripts/cli.js`. Демо создаёт 27 секунд
+Из checkout вместо `automontage` можно писать `node scripts/cli.js`. Демо создаёт 30 секунд
 тестовых тонов (не речь), нейтральную геометрическую PNG и иллюстративные таймкоды. Все восемь
 сцен берутся из [публичного fixture](examples/motion-brief-demo.json); аудио и PNG генерируются
 локально, медиа не коммитятся. Интернет и `.env` для самого демо не нужны; первая установка

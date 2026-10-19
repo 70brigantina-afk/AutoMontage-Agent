@@ -54,7 +54,7 @@ Preview, собранные раньше в половину композици�
 ### Motion-reel :: Анимационный ролик без камеры
 
 Композиция `MotionReel`, тема `motion-neutral`, аудио вместо говорящей головы. Сцены:
-`kinetic-title`, `card`, `steps`, `list`, `counter`, `media`, `cta` – отдельный набор,
+`kinetic-title`, `card`, `steps`, `list`, `counter`, `media`, `cta`, `chart` – отдельный набор,
 не варианты lesson. Полоса субтитров по умолчанию выключена; optional `caption` задаётся в brief.
 Лимиты полей и media/audioMode описаны в [каталоге](SCENE-CATALOG.md#motionreel-восемь-сцен-без-камеры).
 
