@@ -78,6 +78,13 @@ export const planSceneTransitions = (scenes = [], fps) => {
   });
 };
 
+// Кадры sequence, где сцена участвует в переходе: TransitionSeries показывает входящую сцену с
+// презентацией в её первых enterFrames кадрах (кадры перехода в неё), уходящую – в последних
+// exitFrames кадрах (кадры перехода в следующую). Вне них сцена не трансформирована.
+export const backdropVisible = (localFrame, { enterFrames = 0, exitFrames = 0, durationInFrames }) => (
+  localFrame < enterFrames || localFrame >= durationInFrames - exitFrames
+);
+
 // pushCut держит уходящую сцену непрозрачной до конца перехода и рассчитывает, что входящая её
 // закроет. Сцены прозрачные по краям и между элементами, поэтому без этого видна двойная
 // экспозиция. Обёртка гасит уходящую сцену с прогресса cutProgress: склейка чистая.

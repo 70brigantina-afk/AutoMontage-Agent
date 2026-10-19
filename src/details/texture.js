@@ -57,6 +57,50 @@ export const driftAt = (frame, fps, { periodSec = 8, amplitude = 0.06 } = {}) =>
   return { x: amplitude * Math.sin(phase), y: amplitude * Math.cos(phase) };
 };
 
+// Пятна дрейфа в порядке рисования: CSS кладёт первый фон сверху, поэтому второе пятно – первым.
+// Центр в долях слоя, stop – доля радиуса farthest-corner, где пятно становится прозрачным.
+const DRIFT_SPOTS = [
+  { color: 1, cx: 0.8, cy: 0.85, stop: 0.5 },
+  { color: 0, cx: 0.25, cy: 0.2, stop: 0.55 },
+];
+
+// ctx.fillStyle нормализует любой CSS-цвет в '#rrggbb' или 'rgba(r, g, b, a)'.
+const rgbaStops = (ctx, color) => {
+  ctx.fillStyle = color;
+  const value = String(ctx.fillStyle);
+  let rgb = [0, 0, 0];
+  let alpha = 1;
+  const hexMatch = /^#([0-9a-f]{6})$/i.exec(value);
+  const rgbaMatch = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/i.exec(value);
+  if (hexMatch) rgb = [0, 2, 4].map((i) => parseInt(hexMatch[1].slice(i, i + 2), 16));
+  else if (rgbaMatch) {
+    rgb = rgbaMatch.slice(1, 4).map(Number);
+    if (rgbaMatch[4] !== undefined) alpha = Number(rgbaMatch[4]);
+  }
+  const of = (a) => `rgba(${rgb.join(', ')}, ${a})`;
+  return [of(alpha), of(0)];
+};
+
+// Рисует дрейф в canvas один раз: те же два radial-gradient (circle farthest-corner), что прежний
+// CSS-фон слоя. Конец пятна – тот же цвет с нулевой альфой: так CSS интерполирует transparent
+// (premultiplied), и кадр совпадает с CSS-версией (разница не больше 3 из 255 от сглаживания).
+// width/height – CSS-размер слоя, scale – плотность canvas (devicePixelRatio).
+export const paintDrift = (ctx, { width, height, scale = 1, colors }) => {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  for (const spot of DRIFT_SPOTS) {
+    const [solid, clear] = rgbaStops(ctx, colors[spot.color]);
+    const cx = spot.cx * width;
+    const cy = spot.cy * height;
+    const radius = Math.hypot(Math.max(cx, width - cx), Math.max(cy, height - cy));
+    const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+    gradient.addColorStop(0, solid);
+    gradient.addColorStop(spot.stop, clear);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+  }
+};
+
 // 0..1 внутри одного прохода, null вне него (до входа и после 12 кадров при 25 fps).
 export const sheenProgress = (frame, fps, enterFrame = 0, { frames25 = SHEEN_FRAMES_25 } = {}) => {
   const frames = Math.max(1, Math.round((frames25 * fps) / 25));

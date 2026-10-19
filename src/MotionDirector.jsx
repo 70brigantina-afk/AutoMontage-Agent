@@ -14,7 +14,7 @@ import { Drift, Grain, TextureContext } from './details/Texture.jsx';
 import { isDarkBackground } from './details/texture.js';
 import { TransitionSeries } from '@remotion/transitions';
 import {
-  contentFrameAt, getSceneTiming, hasSceneTransitions, planSceneTransitions, presentationFor,
+  backdropVisible, contentFrameAt, getSceneTiming, hasSceneTransitions, planSceneTransitions, presentationFor,
   sceneHold, transitionLead,
 } from './motion/transitions';
 
@@ -46,20 +46,25 @@ export const textureLayers = ({ texture, background = motionTheme.background, fr
 // звук клипа, поэтому видео не продолжается и не обрывается в пустоту.
 // Непрозрачный фон сцены в режиме переходов: тот же фон корня и та же текстура, что под сценами.
 // Входящая сцена закрывает уходящую целиком (wipe открывает новую сцену, а не просвет старой,
-// push не даёт двойной экспозиции). Текстура идёт от глобального кадра композиции, поэтому вне
-// перехода кадр совпадает с прежним, а зерно и дрейф не прыгают на границе сцен. Фон лежит вне
-// Freeze: стоп-кадр хвоста держит содержимое, но не текстуру.
-const sceneBackdrop = ({ texture, frame }) => (
-  <AbsoluteFill data-motion-scene-backdrop="true" style={{ background: motionTheme.background }}>
+// push не даёт двойной экспозиции), уходящая при slide и push не открывает просвет. Текстура идёт
+// от глобального кадра композиции, поэтому зерно и дрейф не прыгают на границе сцен. Фон лежит
+// вне Freeze: стоп-кадр хвоста держит содержимое, но не текстуру.
+// Фон есть только в кадрах перехода (backdropVisible по локальному кадру sequence): вне них сцена
+// не трансформирована, и слой корня под ней даёт тот же кадр, а лишняя копия текстуры – лишь
+// время рендера.
+export const SceneBackdrop = ({ texture, frame, enterFrames, exitFrames, durationInFrames }) => {
+  const local = useCurrentFrame();
+  if (!backdropVisible(local, { enterFrames, exitFrames, durationInFrames })) return null;
+  return <AbsoluteFill data-motion-scene-backdrop="true" style={{ background: motionTheme.background }}>
     {textureLayers({ texture, background: motionTheme.background, frame })}
-  </AbsoluteFill>
-);
+  </AbsoluteFill>;
+};
 
 const renderSceneTransitions = ({ scenes, fps, width, height, texture, frame }) => {
   const plan = planSceneTransitions(scenes, fps);
   let cursor = 0;
   const items = [];
-  plan.forEach(({ index, from, durationInFrames, transition }) => {
+  plan.forEach(({ index, from, durationInFrames, transition }, position) => {
     const natural = cursor - (transition?.frames ?? 0);
     if (transition) {
       const { presentation, timing } = presentationFor(transition, { width, height });
@@ -72,7 +77,8 @@ const renderSceneTransitions = ({ scenes, fps, width, height, texture, frame }) 
       : sceneElement(scenes[index], liveFrames);
     items.push(<TransitionSeries.Sequence key={`s${index}`} name={`motion-scene-${index}`}
       offset={from - natural} durationInFrames={durationInFrames}>
-      {sceneBackdrop({ texture, frame })}
+      <SceneBackdrop texture={texture} frame={frame} durationInFrames={durationInFrames}
+        enterFrames={transition?.frames ?? 0} exitFrames={plan[position + 1]?.transition?.frames ?? 0} />
       <Freeze frame={freezeFrame} active={(frame) => contentFrameAt(frame, liveFrames) < frame}>
         {content}
       </Freeze>

@@ -1,8 +1,8 @@
-import { createContext, useContext } from 'react';
-import { staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
+import { createContext, useContext, useLayoutEffect, useRef } from 'react';
+import { continueRender, delayRender, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import { motionTheme } from '../motion/motion-theme';
 import { GRAIN_DATA_URI } from './grain-data.js';
-import { DRIFT_COLOR_KEYS, DRIFT_OPACITY, GRAIN_OPACITY, GRAIN_TILE, driftAt, grainOffset, sheenProgress } from './texture.js';
+import { DRIFT_COLOR_KEYS, DRIFT_OPACITY, GRAIN_OPACITY, GRAIN_TILE, driftAt, grainOffset, paintDrift, sheenProgress } from './texture.js';
 
 // 'none' | 'subtle': Panel узнаёт режим отсюда и рисует блик только при subtle.
 export const TextureContext = createContext('none');
@@ -30,15 +30,50 @@ export const Grain = ({ opacity = GRAIN_OPACITY, src = null, frame: absoluteFram
 };
 
 // Медленный дрейф цветных пятен фона. Слой шире кадра на амплитуду, края не открываются.
+// Пятна рисуются в canvas один раз (paintDrift, кеш на вкладку) и кладутся в <img>, по кадрам
+// меняется только transform. CSS radial-gradient на весь кадр Chrome растеризует заново на каждом
+// снимке кадра, это было +380 % ко времени рендера; картинка та же (сдвиг и пятна прежние).
+// Именно <img>, а не сам canvas: canvas Chrome выносит в отдельный слой, и текст над ним теряет
+// субпиксельное сглаживание (кадр отличался на краях букв до 94 из 255).
+const driftImages = new Map();
 export const Drift = ({ colors = DRIFT_COLOR_KEYS.map((key) => motionTheme[key]), amplitude = 0.06, frame: absoluteFrame = null }) => {
   const frame = useTextureFrame(absoluteFrame);
   const { fps, width, height } = useVideoConfig();
   const { x, y } = driftAt(frame, fps, { amplitude });
   const [first, second] = colors;
+  const imgRef = useRef(null);
+  useLayoutEffect(() => {
+    const img = imgRef.current;
+    if (!img || typeof document === 'undefined') return;
+    // Размер слоя – из размеров кадра, а не offsetWidth: при монтировании (premount, скрытая
+    // sequence) слой бывает нулевым, и дрейф пропадал. Плотность – как у кадра (scale рендера).
+    const layerWidth = Math.round(width * (1 + 2 * amplitude));
+    const layerHeight = Math.round(height * (1 + 2 * amplitude));
+    const scale = window.devicePixelRatio || 1;
+    const key = [first, second, layerWidth, layerHeight, scale].join('|');
+    let src = driftImages.get(key);
+    if (!src) {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext?.('2d');
+      if (!ctx) return;
+      canvas.width = Math.max(1, Math.round(layerWidth * scale));
+      canvas.height = Math.max(1, Math.round(layerHeight * scale));
+      paintDrift(ctx, { width: layerWidth, height: layerHeight, scale, colors: [first, second] });
+      src = canvas.toDataURL('image/png');
+      driftImages.set(key, src);
+    }
+    // Кадр снимается только после декодирования картинки, иначе дрейф может пропасть.
+    const handle = delayRender('texture-drift');
+    img.src = src;
+    const done = () => continueRender(handle);
+    if (img.decode) img.decode().then(done, done);
+    else done();
+  }, [first, second, amplitude, width, height]);
+  const size = `${(1 + 2 * amplitude) * 100}%`;
   return <div aria-hidden="true" data-texture-drift="true" style={{ ...fill, overflow: 'hidden' }}>
-    <div style={{ position: 'absolute', inset: `${-amplitude * 100}%`,
+    <img ref={imgRef} alt="" style={{ position: 'absolute', left: `${-amplitude * 100}%`, top: `${-amplitude * 100}%`,
+      width: size, height: size,
       transform: `translate(${x * width}px, ${y * height}px)`,
-      background: `radial-gradient(circle at 25% 20%, ${first} 0%, transparent 55%), radial-gradient(circle at 80% 85%, ${second} 0%, transparent 50%)`,
       opacity: DRIFT_OPACITY,
     }} />
   </div>;
