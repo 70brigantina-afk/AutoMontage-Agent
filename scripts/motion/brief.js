@@ -11,6 +11,7 @@ const MOTION_SCENES = [
   'counter',
   'media',
   'cta',
+  'chart',
 ];
 
 // Переходы между сценами: тот же список и те же значения, что в src/motion/transitions.js
@@ -205,6 +206,10 @@ function validateMotionBrief(brief, { requireApproved = false } = {}) {
       errors.push(`scenes[${index}].end: сцена выходит за длительность narration`);
     }
     errors.push(...transitionErrors(scenes, index, fps));
+    if (scene?.scene === 'chart' && Array.isArray(scene.points) && Number.isInteger(scene.highlight)
+      && scene.highlight >= scene.points.length) {
+      errors.push(`scenes[${index}].highlight: индекс ${scene.highlight} вне диапазона точек графика (0–${scene.points.length - 1})`);
+    }
     if (scene?.scene === 'media' && scene.media) {
       const { kind, src } = scene.media;
       if (!isCanonicalMotionReference(src)) {
@@ -276,6 +281,10 @@ function sceneSummary(scene) {
   if (scene.scene === 'steps') return [scene.title, ...(scene.steps || [])].filter(Boolean).join(' → ');
   if (scene.scene === 'list') return [scene.title, ...(scene.items || [])].filter(Boolean).join('; ');
   if (scene.scene === 'counter') return `${scene.label}: ${scene.prefix || ''}${scene.value}${scene.suffix || ''}`;
+  if (scene.scene === 'chart') {
+    const points = (scene.points || []).map(point => `${point.label} ${point.value}`).join('; ');
+    return `${scene.title} (${scene.chartType}${scene.unit ? `, ${scene.unit}` : ''}): ${points}`;
+  }
   if (scene.scene === 'media') return `${scene.media?.kind}: ${scene.media?.src}${scene.overlayText ? ` – ${scene.overlayText}` : ''}`;
   return [scene.title, scene.action, scene.handle].filter(Boolean).join(' – ');
 }

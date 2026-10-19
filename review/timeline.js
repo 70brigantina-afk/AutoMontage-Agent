@@ -125,12 +125,13 @@ function sceneTimes(scene, index, diff) {
 }
 
 export function sceneDisplayText(scene) {
-  if (!['kinetic-title', 'card', 'steps', 'list', 'counter', 'media', 'cta'].includes(scene.scene)) {
+  if (!['kinetic-title', 'card', 'steps', 'list', 'counter', 'media', 'cta', 'chart'].includes(scene.scene)) {
     return scene.caption || scene.headOrange || scene.headCream || scene.scene;
   }
   const fields = [scene.scene, scene.text, scene.title, scene.body, scene.label,
     scene.steps?.join(' → '), scene.items?.join('; '),
     scene.value === undefined ? null : `${scene.prefix || ''}${scene.value}${scene.suffix || ''}`,
+    scene.points?.map(point => `${point.label} ${point.value}`).join('; '), scene.unit,
     scene.overlayText, scene.action, scene.handle, scene.caption];
   return fields.filter(Boolean).join(' · ');
 }

@@ -7,4 +7,4 @@ export { BrowserFrame, ScrollShot, ShutterFlash } from './Screen.jsx';
 export { SfxTrack } from './SfxTrack.jsx';
 export { Subtitles, firstFontFamily } from './Subtitles.jsx';
 export { FontLoader, loadFontFaces, registerFontFaces, settleFontFaces, settleOnce, watchFontFaces } from './FontLoader.jsx';
-export { Odometer } from '../details/index.js';
+export { Odometer, Chart } from '../details/index.js';

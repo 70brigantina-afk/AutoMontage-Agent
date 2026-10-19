@@ -19,7 +19,7 @@ test('MotionReel metadata keeps narration duration, geometry and FPS from valida
   assert.equal(comp.props.fps, 30);
   const props = buildMotionProps({ brief: brief() });
   assert.deepEqual(comp.props.calculateMetadata({ props }), {
-    durationInFrames: 660, width: 1080, height: 1920, fps: 30,
+    durationInFrames: 720, width: 1080, height: 1920, fps: 30,
   });
   assert.deepEqual(comp.props.calculateMetadata({ props: { ...props, width: 720, height: 1280, fps: 25, durationInFrames: 550 } }), {
     durationInFrames: 550, width: 720, height: 1280, fps: 25,
@@ -36,7 +36,7 @@ test('one narration Audio is at root frame zero, scenes have global sequences an
   assert.equal(audio.length, 1);
   assert.equal(audio[0].props.src, '/static/narration.mp3');
   assert.equal(audio[0].props.trimBefore, undefined);
-  assert.equal(sequences.length, 7);
+  assert.equal(sequences.length, 8);
   sequences.forEach((seq, index) => {
     assert.equal(seq.props.from, index * 90);
     assert.equal(seq.props.durationInFrames, 90);

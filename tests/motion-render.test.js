@@ -9,7 +9,7 @@ function html(Component, props) {
   return renderToStaticMarkup(React.createElement(Component, props));
 }
 
-test('all seven motion components render schema-maximum Cyrillic without a camera or default caption', () => {
+test('all eight motion components render schema-maximum Cyrillic without a camera or default caption', () => {
   assert.equal(validateMotionBrief(brief()).ok, true);
   const { MOTION_COMPONENTS } = loadMotion('src/MotionDirector.jsx');
   assert.deepEqual(Object.keys(MOTION_COMPONENTS), MOTION_SCENES);
@@ -134,7 +134,7 @@ test('real MotionReel frames keep every maximum-length Cyrillic field inside saf
   };
   const props = buildMotionProps({ brief: brief(), sourceFile: 'narration.wav' });
   const composition = await selectComposition({ serveUrl, id: 'MotionReel', inputProps: props, puppeteerInstance: browser });
-  assert.equal(composition.durationInFrames, 660);
+  assert.equal(composition.durationInFrames, 720);
   for (const [variant, inputProps] of [
     ['dense', props],
     ['unbroken-caption', { ...props, scenes: scenes.map((scene) => {

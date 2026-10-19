@@ -5,6 +5,7 @@ import { KineticTitle } from './motion/KineticTitle';
 import { CardScene } from './motion/CardScene';
 import { StepsScene } from './motion/StepsScene';
 import { ListScene } from './motion/ListScene';
+import { ChartScene } from './motion/ChartScene';
 import { CounterScene } from './motion/CounterScene';
 import { MediaScene } from './motion/MediaScene';
 import { CtaScene } from './motion/CtaScene';
@@ -17,7 +18,7 @@ import {
 
 export const MOTION_COMPONENTS = {
   'kinetic-title': KineticTitle, card: CardScene, steps: StepsScene, list: ListScene,
-  counter: CounterScene, media: MediaScene, cta: CtaScene,
+  counter: CounterScene, media: MediaScene, cta: CtaScene, chart: ChartScene,
 };
 
 export const getMotionTiming = getSceneTiming;

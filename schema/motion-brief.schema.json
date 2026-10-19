@@ -137,7 +137,8 @@
           { "$ref": "#/definitions/listScene" },
           { "$ref": "#/definitions/counterScene" },
           { "$ref": "#/definitions/mediaScene" },
-          { "$ref": "#/definitions/ctaScene" }
+          { "$ref": "#/definitions/ctaScene" },
+          { "$ref": "#/definitions/chartScene" }
         ]
       }
     }
@@ -246,6 +247,37 @@
         "prefix": { "type": "string", "maxLength": 16 },
         "suffix": { "type": "string", "maxLength": 16 },
         "layout": { "description": "Где стоят prefix и suffix: inline – в одной строке с числом (по умолчанию), stack – стопкой над числом и под ним.", "enum": ["inline", "stack"] }
+      }
+    },
+    "chartScene": {
+      "description": "График из 2–8 точек. Значения и подписи – дословно из ТЗ. bar – столбики, line – линия с точками, bar-to-line – столбики сжимаются в точки, затем прорисовывается линия. highlight – индекс точки (с нуля), выделенной акцентом.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scene", "start", "end", "title", "chartType", "points"],
+      "properties": {
+        "scene": { "const": "chart" },
+        "start": { "$ref": "#/definitions/startTime" },
+        "end": { "$ref": "#/definitions/endTime" },
+        "transition": { "$ref": "#/definitions/sceneTransition" },
+        "caption": { "$ref": "#/definitions/captionText" },
+        "title": { "$ref": "#/definitions/shortText" },
+        "chartType": { "enum": ["bar", "line", "bar-to-line"] },
+        "points": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "value"],
+            "properties": {
+              "label": { "type": "string", "minLength": 1, "maxLength": 24 },
+              "value": { "type": "number", "minimum": 0 }
+            }
+          }
+        },
+        "unit": { "type": "string", "minLength": 1, "maxLength": 16 },
+        "highlight": { "type": "integer", "minimum": 0, "maximum": 7 }
       }
     },
     "mediaScene": {

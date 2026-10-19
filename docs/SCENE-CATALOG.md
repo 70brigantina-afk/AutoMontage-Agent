@@ -77,6 +77,7 @@ preview показывает `[ B-ROLL ]`, пока человек не выбе
 | `counter` | Число, подтверждённое сценарием | `label` ≤80, числовое `value`; optional `prefix`/`suffix` ≤16 |
 | `media` | Проверенное локальное фото/видео с движением | `media: {kind, src, sha256, fit}`; optional `overlayText` ≤120 |
 | `cta` | Понятное следующее действие | `title`, `action` ≤80; optional `handle` ≤80 |
+| `chart` | График с точными значениями из ТЗ | `title` ≤80, `chartType` (`bar`, `line`, `bar-to-line`), 2–8 `points` (`label` ≤24, `value` ≥0); optional `unit` ≤16, `highlight` (индекс точки) |
 
 У всех сцен обязательны `start`/`end`: глобальные секунды, привязанные к кадрам FPS brief,
 без пересечений и выхода за длительность аудио. Не обнуляй озвучку при смене scene.

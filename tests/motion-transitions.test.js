@@ -323,7 +323,7 @@ test('MotionDirector без не-cut переходов рендерит пре�
   for (const value of [base, cut]) {
     const all = children(MotionDirector(buildMotionProps({ brief: value })));
     const sequences = all.filter((el) => el.type === 'sequence');
-    assert.equal(sequences.length, 7);
+    assert.equal(sequences.length, 8);
     sequences.forEach((seq, index) => {
       assert.equal(seq.props.from, index * 90);
       assert.equal(seq.props.durationInFrames, 90);
