@@ -151,6 +151,20 @@ test('Sheen appears on a card entry only when texture is subtle', () => {
   assert.doesNotMatch(render({ scenes: [cardScene], style: { texture: 'subtle' } }), /data-texture-sheen/);
 });
 
+test('Sheen colour contrasts with the panel and the cta sheen starts at the action entrance', () => {
+  const sheenOf = (html) => /data-texture-sheen[\s\S]*?transparent 0%, ([^ ]+) 50%/.exec(html)?.[1];
+  const { motionTheme, entranceDelay } = loadMotion('src/motion/motion-theme.js');
+  const cardHtml = render({ scenes: [cardScene], style: { texture: 'subtle' } }, { useCurrentFrame: () => 4 });
+  assert.ok(sheenOf(cardHtml));
+  assert.notEqual(sheenOf(cardHtml).toLowerCase(), motionTheme.panel.toLowerCase());
+  const cta = { scene: 'cta', start: 0, end: 4, title: 'Заголовок', action: 'Действие' };
+  const delay = Math.round(entranceDelay(30, 120, 1, 2));
+  assert.ok(delay > 0);
+  const at = (frame) => render({ scenes: [cta], style: { texture: 'subtle' } }, { useCurrentFrame: () => frame });
+  assert.doesNotMatch(at(delay - 1), /data-texture-sheen/);
+  assert.match(at(delay + 2), /data-texture-sheen/);
+});
+
 test('motion-kit exports the texture parts', () => {
   const kit = loadMotion('src/motion-kit/index.js');
   for (const name of ['Grain', 'Drift', 'Sheen', 'grainOffset', 'driftAt', 'sheenProgress']) assert.ok(kit[name], name);

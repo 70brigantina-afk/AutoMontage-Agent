@@ -77,10 +77,13 @@ export const SceneFrame = ({ children, caption }) => {
   </div>;
 };
 
-export const Panel = ({ children, style = {} }) => {
+export const Panel = ({ children, style = {}, sheenFrame = 0 }) => {
   const subtle = useTexture() === 'subtle';
+  const background = style.background || t.panel;
+  // Блик контрастирует с фоном карточки: на светлой панели акцентно-светлый, на акцентной белый.
+  const sheenColor = background === t.panel ? t.accentSoft : t.panel;
   return <div style={{
     background: t.panel, borderRadius: t.radius, padding: 38, boxSizing: 'border-box',
     border: `1px solid ${t.line}`, ...(subtle ? { position: 'relative' } : {}), ...style,
-  }}>{subtle && <Sheen />}{subtle ? <div data-panel-content="true" style={{ position: 'relative', zIndex: 1 }}>{children}</div> : children}</div>;
+  }}>{subtle && <Sheen enterFrame={Math.round(sheenFrame)} color={sheenColor} />}{subtle ? <div data-panel-content="true" style={{ position: 'relative', zIndex: 1 }}>{children}</div> : children}</div>;
 };

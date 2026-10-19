@@ -11,6 +11,14 @@ export const motionPresets = Object.freeze({ entranceSec: 0.45, eventSec: 1.8, r
 export const clamp01 = (value) => Math.max(0, Math.min(1, value));
 export const easeOut = (value) => 1 - (1 - clamp01(value)) ** 3;
 
+// Кадр, с которого начинается появление элемента index (то же расписание, что у revealProgress).
+export const entranceDelay = (fps, durationInFrames, index = 0, count = 1, spacingSec = motionPresets.eventSec) => {
+  const last = Math.max(0, durationInFrames - 1);
+  if (last === 0 || count <= 1) return 0;
+  const entrance = Math.min(fps * motionPresets.entranceSec, last / Math.max(2, count));
+  return index * Math.min(fps * spacingSec, (last - entrance) / (count - 1));
+};
+
 export const revealProgress = (frame, fps, durationInFrames, index = 0, count = 1, spacingSec = motionPresets.eventSec) => {
   const last = Math.max(0, durationInFrames - 1);
   if (last === 0) return 1;

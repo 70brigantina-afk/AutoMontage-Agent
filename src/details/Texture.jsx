@@ -36,14 +36,14 @@ export const Drift = ({ colors = DRIFT_COLOR_KEYS.map((key) => motionTheme[key])
 };
 
 // Один проход по карточке на входе; вне прохода ничего не рисуется (не в цикле).
-export const Sheen = ({ enterFrame = 0 }) => {
+export const Sheen = ({ enterFrame = 0, color = motionTheme.accentSoft }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const progress = sheenProgress(frame, fps, enterFrame);
   if (progress === null) return null;
   return <div aria-hidden="true" data-texture-sheen="true" style={{ ...fill, overflow: 'hidden', borderRadius: 'inherit' }}>
     <div style={{ position: 'absolute', top: 0, bottom: 0, width: '40%', left: `${-40 + 140 * progress}%`,
-      background: `linear-gradient(100deg, transparent 0%, ${motionTheme.panel} 50%, transparent 100%)`,
+      background: `linear-gradient(100deg, transparent 0%, ${color} 50%, transparent 100%)`,
       opacity: 0.35, transform: 'skewX(-12deg)',
     }} />
   </div>;
