@@ -252,6 +252,69 @@ test('a lease path that keeps vanishing is a conflict, but a missing project fol
   );
 });
 
+test('a Windows lease pending deletion (EPERM, EBUSY) is contention: acquisition retries, persistent lock is a bounded conflict', (t) => {
+  const workspace = makeProject(t, 'Delete pending lease');
+  const leasePath = path.join(workspace.dir, '.project-mutation.lock');
+  // Windows: предыдущий владелец как раз удаляет lease (delete pending). lstat, realpath и link
+  // по этому имени отвечают EPERM или EBUSY вместо ENOENT, пока последний дескриптор не закрыт.
+  function pendingFileSystem({ failures, code = 'EPERM', methods = ['lstatSync', 'realpathSync', 'linkSync'] }) {
+    const calls = Object.fromEntries(methods.map((method) => [method, 0]));
+    const fileSystem = new Proxy(fs, {
+      get(target, key) {
+        if (!methods.includes(key)) return Reflect.get(target, key);
+        return (...args) => {
+          const name = key === 'linkSync' ? args[1] : args[0];
+          if (path.resolve(String(name)) === leasePath) {
+            calls[key] += 1;
+            if (calls[key] <= failures) {
+              throw Object.assign(new Error(`${code}: operation not permitted, ${key} '${leasePath}'`), { code });
+            }
+          }
+          return target[key](...args);
+        };
+      },
+    });
+    return { fileSystem, calls };
+  }
+  const leftovers = () => fs.readdirSync(workspace.dir).filter((name) => name.startsWith('.project-mutation.lock'));
+
+  for (const code of ['EPERM', 'EBUSY']) {
+    const transient = pendingFileSystem({ failures: 1, code });
+    const lease = acquireProjectMutationLease(workspace.dir, { fileSystem: transient.fileSystem, platform: 'win32' });
+    assert.equal(lease.path, leasePath);
+    assert.equal(transient.calls.linkSync, 2, `${code}: занятое имя lease повторено, а не брошено`);
+    lease.release();
+    assert.deepEqual(leftovers(), []);
+  }
+
+  const persistent = pendingFileSystem({ failures: Infinity, methods: ['linkSync'] });
+  assert.throws(
+    () => acquireProjectMutationLease(workspace.dir, { fileSystem: persistent.fileSystem, platform: 'win32' }),
+    (error) => error && error.code === 'PROJECT_MANIFEST_CONFLICT',
+  );
+  assert.ok(persistent.calls.linkSync <= 4, 'попытки ограничены, без бесконечного цикла');
+  assert.deepEqual(leftovers(), []);
+
+  const pendingOnResolve = pendingFileSystem({ failures: Infinity, methods: ['realpathSync'] });
+  const existing = acquireProjectMutationLease(workspace.dir);
+  try {
+    assert.throws(
+      () => acquireProjectMutationLease(workspace.dir, { fileSystem: pendingOnResolve.fileSystem, platform: 'win32' }),
+      (error) => error && error.code === 'PROJECT_MANIFEST_CONFLICT',
+    );
+  } finally {
+    existing.release();
+  }
+
+  // Вне Windows EPERM остаётся настоящей ошибкой доступа, а не занятостью.
+  const linux = pendingFileSystem({ failures: 1, methods: ['linkSync'] });
+  assert.throws(
+    () => acquireProjectMutationLease(workspace.dir, { fileSystem: linux.fileSystem, platform: 'linux' }),
+    (error) => error && error.code === 'EPERM',
+  );
+  assert.deepEqual(leftovers(), []);
+});
+
 test('a hard process exit leaves a provably dead lease that the next mutation reclaims', async (t) => {
   const workspace = makeProject(t, 'Dead owner');
   const workerPath = writeLeaseWorker(path.dirname(workspace.dir));
