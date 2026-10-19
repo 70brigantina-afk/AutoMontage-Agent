@@ -79,3 +79,19 @@ test('документы без U+2014 и личных путей', () => {
     assert.ok(!/\/Users\/|\/home\//u.test(text), `${file}: личный путь`);
   }
 });
+
+test('зерно: только на тёмном фоне и неподвижное; на светлом subtle – дрейф и блик; причина – размер файла', () => {
+  assert.match(details, /тёмн/u);
+  assert.match(details, /неподвижн/u);
+  assert.match(details, /светл[\s\S]{0,80}дрейф[\s\S]{0,40}блик/u);
+  assert.match(details, /МБ|тяжел|размер файла/u);
+  assert.doesNotMatch(details, /раз в 2 кадра/u);
+  assert.match(read('skills/motion-reel/references/brief-package.md'), /тёмн/u);
+  assert.match(read('docs/SCENE-CATALOG.md'), /тёмн/u);
+  assert.match(read('docs/MOTION-KIT.md'), /`video-bitrate`/u);
+  const log = read('CHANGELOG.md');
+  const unreleased = log.slice(log.indexOf('## [Unreleased]'), log.indexOf('\n## [', log.indexOf('## [Unreleased]') + 5));
+  assert.match(unreleased, /### Исправлено/u);
+  assert.match(unreleased, /зерн/u);
+  assert.match(unreleased, /video-bitrate/u);
+});

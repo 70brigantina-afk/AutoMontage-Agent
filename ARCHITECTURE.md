@@ -1202,7 +1202,8 @@ flowchart TD
 `chart`, `style.texture`) → `MotionDirector` и `src/motion/parts.jsx` → детали; цвета и шрифты
 приходят из `motionTheme`. Те же компоненты экспортирует `@automontage/motion-kit` для проектных
 сцен через `item.props.view`. Текстура включается только значением `style.texture: "subtle"` и
-лежит под текстом.
+лежит под текстом; зерно неподвижно и рисуется только на тёмном фоне (`isDarkBackground`,
+относительная яркость < 0,4), поэтому на светлой теме `motion-neutral` его нет.
 
 `MotionReel` по умолчанию имеет 1080×1920/30 FPS; `calculateMetadata` берёт геометрию, FPS
 и полную длительность narration из props, включая хвост после последней сцены. Единственный
