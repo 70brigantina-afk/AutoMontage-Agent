@@ -329,24 +329,26 @@ test('isDarkBackground: полупрозрачный rgba не считаетс�
 });
 
 // Скорость: CSS radial-gradient на весь кадр Chrome растеризует заново на каждом снимке кадра
-// (captureBeyondViewport), это давало +380 % ко времени рендера. Дрейф рисуется один раз в canvas,
-// по кадрам меняется только translate3d.
-test('Drift – canvas-слой: по кадрам меняется только transform (translate3d), остальное неизменно', () => {
+// (captureBeyondViewport), это давало +380 % ко времени рендера. Дрейф рисуется один раз в canvas
+// и показывается картинкой <img>, по кадрам меняется только transform. Сам canvas в DOM не кладём:
+// Chrome выносит его в слой, и текст над ним теряет субпиксельное сглаживание.
+test('Drift – слой-картинка: по кадрам меняется только transform, остальное неизменно', () => {
   const tagAt = (frame) => {
     const { Drift } = loadMotion('src/details/Texture.jsx', { useCurrentFrame: () => frame });
     const html = renderToStaticMarkup(React.createElement(Drift));
-    const tag = /<canvas[^>]*>/.exec(html)?.[0];
-    assert.ok(tag, 'слой дрейфа – canvas');
+    const tag = /<img[^>]*>/.exec(html)?.[0];
+    assert.ok(tag, 'слой дрейфа – img');
+    assert.doesNotMatch(html, /<canvas/, 'canvas не в DOM: иначе текст теряет субпиксельное сглаживание');
     assert.doesNotMatch(html, /radial-gradient/, 'CSS-градиент не растеризуется на каждом кадре');
     return tag;
   };
   const a = tagAt(10);
   const b = tagAt(47);
-  assert.match(a, /transform:translate3d\(/);
-  assert.match(a, /will-change:transform/);
+  assert.match(a, /transform:translate\(/);
+  assert.doesNotMatch(a, /will-change/);
   assert.match(a, /opacity:0\.3/);
   assert.notEqual(a, b, 'дрейф движется');
-  const still = (tag) => tag.replace(/transform:translate3d\([^)]*\)/, 'transform:X');
+  const still = (tag) => tag.replace(/transform:translate\([^)]*\)/, 'transform:X');
   assert.equal(still(a), still(b), 'кроме transform слой одинаков на разных кадрах');
 });
 
