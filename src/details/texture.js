@@ -1,4 +1,6 @@
 // Математика текстуры кадра: сдвиг зерна, дрейф фона, проход блика. Без React и тем.
+import { ref25 } from '../motion-kit/time.js';
+
 export const GRAIN_OPACITY = 0.06;
 export const GRAIN_TILE = 256;
 // Непрозрачность слоя дрейфа: от неё зависит худший контраст подписи над пятном.
@@ -101,9 +103,10 @@ export const paintDrift = (ctx, { width, height, scale = 1, colors }) => {
   }
 };
 
-// 0..1 внутри одного прохода, null вне него (до входа и после 12 кадров при 25 fps).
+// 0..1 внутри одного прохода, null вне него (до входа и после 12 кадров при 25 fps; при другом fps
+// те же 0,48 с через ref25).
 export const sheenProgress = (frame, fps, enterFrame = 0, { frames25 = SHEEN_FRAMES_25 } = {}) => {
-  const frames = Math.max(1, Math.round((frames25 * fps) / 25));
+  const frames = ref25(frames25, fps);
   const local = frame - enterFrame;
   if (local < 0 || local >= frames) return null;
   return local / frames;

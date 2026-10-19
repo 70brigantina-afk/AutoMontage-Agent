@@ -257,14 +257,72 @@ test('muted, ink and accent text stay >= 4.5 over the worst Drift blend plus wor
   }
 });
 
-test('Sheen is painted before the card content and the content sits above it', () => {
-  const html = render({ scenes: [cardScene], style: { texture: 'subtle' } }, { useCurrentFrame: () => 4 });
+// Тег карточки (Panel) – первый div с рамкой и паддингом 38 внутри сцены.
+const panelTag = (html) => {
+  const at = html.indexOf('padding:38px');
+  return html.slice(html.lastIndexOf('<', at), html.indexOf('>', at) + 1);
+};
+const sceneSlice = (html) => html.slice(html.indexOf('data-motion-safe'));
+const at = (frame, fps, texture) => render({ scenes: [cardScene], ...(texture ? { style: { texture } } : {}) }, {
+  useCurrentFrame: () => frame, useVideoConfig: () => ({ width: 1080, height: 1920, fps, durationInFrames: 630 }) });
+
+test('Sheen during its pass sits under the card content without wrapping it', () => {
+  const html = at(4, 25, 'subtle');
+  assert.match(html, /data-texture-sheen/);
+  assert.doesNotMatch(html, /data-panel-content/, 'контент карточки не оборачивается');
+  assert.match(panelTag(html), /position:relative/);
+  assert.match(panelTag(html), /isolation:isolate/, 'карточка – свой контекст наложения, блик не уходит под её фон');
   const sheen = html.indexOf('data-texture-sheen');
-  const content = html.indexOf('data-panel-content');
-  assert.ok(sheen >= 0 && content > sheen, 'sheen precedes content in DOM');
-  const tag = html.slice(html.lastIndexOf('<', content), html.indexOf('>', content));
-  assert.match(tag, /position:relative/);
-  assert.match(tag, /z-index:1/);
+  const sheenTag = html.slice(html.lastIndexOf('<', sheen), html.indexOf('>', sheen));
+  assert.match(sheenTag, /z-index:-1/, 'блик под контентом карточки');
+});
+
+test('outside the Sheen pass the subtle card is the same DOM as texture none', () => {
+  for (const [frame, fps] of [[12, 25], [40, 25], [89, 30], [24, 50]]) {
+    const subtle = at(frame, fps, 'subtle');
+    assert.doesNotMatch(subtle, /data-texture-sheen|data-panel-content|z-index|isolation/, `${frame}@${fps}`);
+    assert.doesNotMatch(panelTag(subtle), /position:relative/, `${frame}@${fps}`);
+    assert.equal(sceneSlice(subtle), sceneSlice(at(frame, fps)), `${frame}@${fps}: сцена как при none`);
+  }
+});
+
+test('Sheen pass is 12 frames at 25 fps and the same 0.48 s at 50 fps (ref25)', () => {
+  const has = (frame, fps) => /data-texture-sheen/.test(at(frame, fps, 'subtle'));
+  assert.deepEqual([0, 11, 12].map((f) => has(f, 25)), [true, true, false]);
+  assert.deepEqual([0, 23, 24].map((f) => has(f, 50)), [true, true, false]);
+  const { sheenProgress } = math();
+  const { ref25 } = loadMotion('src/motion-kit/time.js');
+  for (const fps of [24, 25, 30, 50, 60]) {
+    const frames = ref25(12, fps);
+    assert.notEqual(sheenProgress(frames - 1, fps), null, `${fps}`);
+    assert.equal(sheenProgress(frames, fps), null, `${fps}`);
+  }
+});
+
+test('Panel keeps children at one tree position in and out of the Sheen pass (no remount)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'panel-'));
+  try {
+    const entry = path.join(dir, 'entry.jsx');
+    fs.writeFileSync(entry, `export { Panel } from ${JSON.stringify(path.join(ROOT, 'src/motion/parts.jsx'))};
+export { TextureContext } from ${JSON.stringify(path.join(ROOT, 'src/details/Texture.jsx'))};\n`);
+    const shape = (frame) => {
+      const { Panel, TextureContext } = loadMotion(path.relative(ROOT, entry), { useCurrentFrame: () => frame,
+        useVideoConfig: () => ({ width: 1080, height: 1920, fps: 25, durationInFrames: 100 }) });
+      const marker = React.createElement('i', { 'data-marker': 'yes' });
+      let element = null;
+      // Panel вызывается как функция внутри компонента: его хуки – хуки обёртки, а результат виден целиком.
+      const Probe = () => { element = Panel({ children: marker }); return element; };
+      renderToStaticMarkup(React.createElement(TextureContext.Provider, { value: 'subtle' }, React.createElement(Probe)));
+      const kids = [].concat(element.props.children);
+      return { type: element.type, length: kids.length, index: kids.indexOf(marker) };
+    };
+    const inside = shape(3);
+    const outside = shape(40);
+    assert.ok(inside.index >= 0, 'children лежат прямо в карточке');
+    assert.deepEqual(outside, inside, 'тип, число и место детей одинаковы в проходе и вне его');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('Drift takes an explicit absolute frame: inside a scene it matches the root layer at the same composition frame', () => {
