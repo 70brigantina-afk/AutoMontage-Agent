@@ -166,9 +166,12 @@ function resolveProjectPathOnce(projectDir, storedPath, options) {
   const label = options.label || 'project path';
   const fileSystem = options.fileSystem || fs;
   const platform = options.platform || process.platform;
-  // Отсутствие допустимо – удаляемый на Windows файл равен отсутствующему. Безопасность не
-  // страдает: реальный путь ближайшего существующего предка уже сверен с корнем проекта выше.
-  const pendingPlatform = options.mustExist ? null : platform;
+  // Только по явному запросу (захват lease): удаляемый на Windows файл равен отсутствующему.
+  // На Windows EPERM значит и обычный ACCESS_DENIED, поэтому остальные вызовы остаются строгими:
+  // иначе symlink в последнем сегменте с отказом lstat/realpath прошёл бы без проверки цели.
+  const pendingPlatform = options.tolerateWindowsPendingDelete === true && !options.mustExist
+    ? platform
+    : null;
   if (typeof storedPath !== 'string' || storedPath.length === 0 || storedPath.includes('\0')) {
     throw new Error(`${label} must be a non-empty relative path`);
   }
@@ -1070,6 +1073,7 @@ function acquireProjectMutationLease(projectDir, {
       mustExist: false,
       type: 'file',
       platform,
+      tolerateWindowsPendingDelete: true,
     });
   } catch (error) {
     // Lease другого процесса исчезает и появляется непрерывно: это занятость, а не сбой.

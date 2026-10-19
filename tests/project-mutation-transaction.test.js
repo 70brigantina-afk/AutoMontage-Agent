@@ -315,6 +315,59 @@ test('a Windows lease pending deletion (EPERM, EBUSY) is contention: acquisition
   assert.deepEqual(leftovers(), []);
 });
 
+test('a dead lease that vanishes or goes delete pending during the pre-release check is a conflict, not a raw error', (t) => {
+  const workspace = makeProject(t, 'Vanishing dead lease');
+  const leasePath = path.join(workspace.dir, '.project-mutation.lock');
+  const owner = {
+    version: 1,
+    token: '11111111-1111-4111-8111-111111111111',
+    pid: 424242,
+    hostname: 'lease-host',
+    acquiredAt: '2026-08-05T12:00:00.000Z',
+  };
+  const dead = () => { throw Object.assign(new Error('ESRCH'), { code: 'ESRCH' }); };
+  // Первое чтение (readLeaseOwner) видит брошенный lease; повторная сверка перед удалением
+  // ловит его уже исчезнувшим (ENOENT, ENOTDIR на любой ОС) или удаляемым на Windows (EPERM, EBUSY).
+  function vanishingOnRecheck(code) {
+    let reads = 0;
+    return new Proxy(fs, {
+      get(target, key) {
+        if (key !== 'readFileSync') return Reflect.get(target, key);
+        return (filename, ...args) => {
+          if (path.resolve(String(filename)) === leasePath && (reads += 1) === 2) {
+            throw Object.assign(new Error(`${code}: lease check '${leasePath}'`), { code });
+          }
+          return target.readFileSync(filename, ...args);
+        };
+      },
+    });
+  }
+  const cases = [
+    ['ENOENT', 'linux', 'PROJECT_MANIFEST_CONFLICT'],
+    ['ENOTDIR', 'linux', 'PROJECT_MANIFEST_CONFLICT'],
+    ['ENOENT', 'win32', 'PROJECT_MANIFEST_CONFLICT'],
+    ['EPERM', 'win32', 'PROJECT_MANIFEST_CONFLICT'],
+    ['EBUSY', 'win32', 'PROJECT_MANIFEST_CONFLICT'],
+    // Вне Windows EPERM остаётся настоящей ошибкой доступа.
+    ['EPERM', 'linux', 'EPERM'],
+  ];
+  for (const [code, platform, expected] of cases) {
+    fs.writeFileSync(leasePath, `${JSON.stringify(owner)}\n`);
+    assert.throws(
+      () => acquireProjectMutationLease(workspace.dir, {
+        fileSystem: vanishingOnRecheck(code),
+        platform,
+        hostname: owner.hostname,
+        killProcess: dead,
+      }),
+      (error) => error && error.code === expected,
+      `${code} ${platform}`,
+    );
+    assert.equal(fs.readFileSync(leasePath, 'utf8'), `${JSON.stringify(owner)}\n`, 'чужой lease не удалён');
+  }
+  fs.unlinkSync(leasePath);
+});
+
 test('a hard process exit leaves a provably dead lease that the next mutation reclaims', async (t) => {
   const workspace = makeProject(t, 'Dead owner');
   const workerPath = writeLeaseWorker(path.dirname(workspace.dir));
