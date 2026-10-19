@@ -1191,9 +1191,18 @@ flowchart TD
 - `Dynamic` – блоки из scenario: карточки, счётчики, b-roll, CTA и субтитры.
 - `ReelScenes` – официальная библиотека lesson-сцен через `SceneDirector`.
 - `MotionReel` – независимый camera-free `MotionDirector`: `kinetic-title`, `card`, `steps`,
-  `list`, `counter`, `media`, `cta`; props строятся из проверенного motion brief.
+  `list`, `counter`, `media`, `cta`, `chart`; props строятся из проверенного motion brief.
 - `LessonSeq` и связанные lesson-композиции – ранний слайдовый путь, сохранённый в коде.
 - Демо-композиции используют готовые данные из `src/scenario-*.js` и `examples/`.
+
+`src/details/` – общие детали кадра без привязки к теме: `Odometer` (`odometer.js`: форматирование
+числа, колонки цифр, прогресс прокрутки и оседания), `Chart` (`chart.js`: геометрия, рост столбиков,
+переход в линию), `Grain`, `Drift`, `Sheen` (`texture.js`, `Texture.jsx`; плитка зерна лежит в
+`grain-data.js`, его создаёт `scripts/gen-grain.js`). Поток данных: motion brief (`counter`,
+`chart`, `style.texture`) → `MotionDirector` и `src/motion/parts.jsx` → детали; цвета и шрифты
+приходят из `motionTheme`. Те же компоненты экспортирует `@automontage/motion-kit` для проектных
+сцен через `item.props.view`. Текстура включается только значением `style.texture: "subtle"` и
+лежит под текстом.
 
 `MotionReel` по умолчанию имеет 1080×1920/30 FPS; `calculateMetadata` берёт геометрию, FPS
 и полную длительность narration из props, включая хвост после последней сцены. Единственный

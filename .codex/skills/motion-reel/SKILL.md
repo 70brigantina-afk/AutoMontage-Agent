@@ -30,8 +30,8 @@ OpenAI/Anthropic API для сценария, режиссуры или монт
 
 - Используй отдельную композицию `MotionReel` и схему `schema/motion-brief.schema.json`.
   Исходник – аудио, без `faceSrc`, подставного видео и требования показывать спикера в хуке.
-- Готовый маршрут использует семь сцен: `kinetic-title`, `card`, `steps`, `list`, `counter`,
-  `media`, `cta` и публичную тему `motion-neutral`; стандарт – 1080×1920, 30 FPS.
+- Готовый маршрут использует восемь сцен: `kinetic-title`, `card`, `steps`, `list`, `counter`,
+  `media`, `cta`, `chart` и публичную тему `motion-neutral`; стандарт – 1080×1920, 30 FPS.
 - Creative Motion создаёт новый арт-дирекшн и project-local полноразмерный motion-слой внутри
   `projects/<id>/motion-vNN/`. После официальной нормализации он подключается как проверенная
   `media`-сцена с `audioMode: mute` по умолчанию (эффекты в слое – только по просьбе
