@@ -8,10 +8,12 @@ const { spawnSync } = require('node:child_process');
 const {
   analyzeArgs,
   evaluateMotionPreview,
+  formatMotionReport,
   measureMotionPreview,
   parseBlackdetect,
   parseEbur128,
   parseProbe,
+  probeArgs,
   runMotionPreviewGates,
   BLACKDETECT_FILTER,
 } = require('../scripts/qa/motion-preview-gates');
@@ -44,13 +46,13 @@ frame=   90 fps=0.0 q=-0.0 Lsize=N/A time=00:00:03.00 bitrate=N/A speed=33.9x
     Peak:      -16.1 dBFS
 `;
 
-const probeJson = ({ width = 320, height = 568, fps = '30/1', rates = [48000], duration = '3.000000' } = {}) => JSON.stringify({
+const probeJson = ({ width = 320, height = 568, fps = '30/1', rates = [48000], duration = '3.000000', bitRate = '150000', formatBitRate } = {}) => JSON.stringify({
   programs: [],
   streams: [
-    { codec_type: 'video', width, height, r_frame_rate: fps, avg_frame_rate: fps, duration },
+    { codec_type: 'video', width, height, r_frame_rate: fps, avg_frame_rate: fps, duration, ...(bitRate ? { bit_rate: bitRate } : {}) },
     ...rates.map((rate) => ({ codec_type: 'audio', sample_rate: String(rate), r_frame_rate: '0/0', avg_frame_rate: '0/0', duration })),
   ],
-  format: { duration },
+  format: { duration, ...(formatBitRate ? { bit_rate: formatBitRate } : {}) },
 });
 const EXPECTED = { width: 320, height: 568, fps: 30 };
 const byId = (result, id) => result.checks.find((item) => item.id === id);
@@ -73,6 +75,7 @@ test('ebur128 parser reads integrated loudness and true peak from the final Summ
 test('probe parser reads geometry, fps and every audio stream', () => {
   assert.deepEqual(parseProbe(probeJson({ rates: [44100, 48000], fps: '30000/1001' })), {
     width: 320, height: 568, fps: 30000 / 1001, durationSec: 3, audio: [{ sampleRate: 44100 }, { sampleRate: 48000 }], hasVideo: true,
+    videoBitRate: 150000, bitRateSource: 'stream',
   });
   assert.throws(() => parseProbe('not json'), /JSON/);
 });
@@ -86,7 +89,7 @@ test('a clean full preview passes every check', () => {
   assert.equal(result.block, false);
   assert.deepEqual(result.checks.map((item) => [item.id, item.status]), [
     ['frame-size', 'pass'], ['fps', 'pass'], ['audio-streams', 'pass'], ['sample-rate', 'pass'],
-    ['black-frames', 'pass'], ['loudness-integrated', 'pass'], ['true-peak', 'pass'],
+    ['black-frames', 'pass'], ['loudness-integrated', 'pass'], ['true-peak', 'pass'], ['video-bitrate', 'pass'],
   ]);
 });
 
@@ -172,7 +175,7 @@ test('the gate writes qa/motion-preview-<label>.json without absolute paths', (t
   const stored = JSON.parse(fs.readFileSync(full.reportPath, 'utf8'));
   assert.equal(stored.kind, 'motion-preview');
   assert.equal(stored.createdAt, '2026-10-17T10:00:00.000Z');
-  assert.equal(stored.checks.length, 7);
+  assert.equal(stored.checks.length, 8);
   assert.equal(fs.readFileSync(full.reportPath, 'utf8').includes(projectDir), false);
   const part = runMotionPreviewGates({ projectDir, videoPath: 'x.mp4', expected: EXPECTED, range: { kind: 'excerpt', fromSec: 1.5, toSec: 2.25 } }, { measureImpl, now });
   assert.equal(path.basename(part.reportPath), 'motion-preview-excerpt-1500-2250.json');
@@ -293,4 +296,51 @@ test('a file without a video stream fails with a report instead of crashing ffmp
   assert.equal(byId(result, 'frame-size').status, 'fail');
   assert.match(byId(result, 'frame-size').message, /видеодорожк/);
   assert.equal(byId(result, 'black-frames').status, 'fail');
+});
+
+// Размер файла: полнокадровый шум (зерно, мерцание) h264 не сжимает – 27 с ролика весили 78–136 МБ.
+const FULL = { width: 1080, height: 1920, fps: 30 };
+const fullProbe = (options) => parseProbe(probeJson({ width: 1080, height: 1920, ...options }));
+
+test('probe asks ffprobe for stream and format bit_rate and falls back to the container rate', () => {
+  const entries = probeArgs('a.mp4')[probeArgs('a.mp4').indexOf('-show_entries') + 1];
+  assert.match(entries, /stream=[^:]*bit_rate/);
+  assert.match(entries, /format=[^:]*bit_rate/);
+  const fallback = parseProbe(probeJson({ bitRate: null, formatBitRate: '3000000' }));
+  assert.deepEqual([fallback.videoBitRate, fallback.bitRateSource], [3000000, 'format']);
+  const none = parseProbe(probeJson({ bitRate: 'N/A' }));
+  assert.deepEqual([none.videoBitRate, none.bitRateSource], [null, null]);
+});
+
+test('video-bitrate: 23 Mbit/s at 1080x1920 30 fps warns but never blocks', () => {
+  const result = evaluateMotionPreview(passing({ probe: fullProbe({ bitRate: '23000000' }) }), FULL);
+  const item = byId(result, 'video-bitrate');
+  assert.equal(item.status, 'warn');
+  assert.equal(result.block, false, 'warn не блокирует публикацию');
+  assert.equal(item.measured, 23);
+  assert.match(item.limit, /20/);
+  assert.match(item.message, /зерно/);
+  assert.match(item.message, /тяж[её]л/);
+  assert.match(formatMotionReport(result), /⚠️ video-bitrate/);
+  assert.match(formatMotionReport(result), /всё хорошо/);
+});
+
+test('video-bitrate: 2 Mbit/s passes; the limit scales with pixel area and fps', () => {
+  assert.equal(byId(evaluateMotionPreview(passing({ probe: fullProbe({ bitRate: '2000000' }) }), FULL), 'video-bitrate').status, 'pass');
+  // 540x960 – четверть площади: порог 5 Мбит/с, 6 Мбит/с уже тяжело.
+  const small = { width: 540, height: 960, fps: 30 };
+  const probe = (bitRate) => parseProbe(probeJson({ width: 540, height: 960, bitRate }));
+  assert.equal(byId(evaluateMotionPreview(passing({ probe: probe('6000000') }), small), 'video-bitrate').status, 'warn');
+  assert.equal(byId(evaluateMotionPreview(passing({ probe: probe('4500000') }), small), 'video-bitrate').status, 'pass');
+  // 60 fps – порог вдвое выше: 30 Мбит/с ещё в норме.
+  const fast = parseProbe(probeJson({ width: 1080, height: 1920, fps: '60/1', bitRate: '30000000' }));
+  assert.equal(byId(evaluateMotionPreview(passing({ probe: fast }), { ...FULL, fps: 60 }), 'video-bitrate').status, 'pass');
+});
+
+test('video-bitrate: no bit_rate in ffprobe is skipped with a reason, not a pass or a fail', () => {
+  const result = evaluateMotionPreview(passing({ probe: fullProbe({ bitRate: null }) }), FULL);
+  const item = byId(result, 'video-bitrate');
+  assert.equal(item.status, 'skipped');
+  assert.match(item.message, /bit_rate/);
+  assert.equal(result.block, false);
 });

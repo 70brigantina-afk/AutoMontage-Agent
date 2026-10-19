@@ -1,6 +1,6 @@
 // Автоматический барьер motion-preview (#43, D-049). Меряет собранный, но ещё не опубликованный файл
 // preview motion-reel (с речью и без неё, --music-only): чёрные провалы, громкость по EBU R128,
-// дорожку звука и геометрию кадра. Любой fail – preview не публикуется, прошлый остаётся. Флага обхода нет.
+// дорожку звука, геометрию кадра и битрейт видео (только предупреждение). Любой fail – preview не публикуется, прошлый остаётся. Флага обхода нет.
 // Парсеры вывода ffmpeg – чистые функции, их проверяют unit-тесты на настоящем выводе ffmpeg.
 const fs = require('node:fs');
 const path = require('node:path');
@@ -30,6 +30,13 @@ const HEAD_MAX_SEC = 1;
 const TAIL_MAX_SEC = 1.5;
 const CAPTURE_MAX_BUFFER = 16 * 1024 * 1024;
 const AUDIO_RECIPE = 'skills/ai-promo/references/audio-recipe.md';
+// Порог битрейта видео: 20 Мбит/с для 1080x1920 при 30 fps, масштаб по площади кадра и fps:
+// limit = 20e6 × (width × height) / (1080 × 1920) × fps / 30. Чистая motion-графика при CRF 18 – около
+// 1 Мбит/с; выше порога почти всегда полнокадровый шум (анимированное зерно, мерцание), который h264
+// не сжимает. Только warn: ролик рабочий, но тяжёлый.
+const BITRATE_REF_BPS = 20e6;
+const BITRATE_REF_PIXELS = 1080 * 1920;
+const BITRATE_REF_FPS = 30;
 
 const round = (value, digits = 2) => (Number.isFinite(value) ? Number(value.toFixed(digits)) : value);
 const sec = (value) => `${round(value, 2)}`.replace('.', ',');
@@ -76,7 +83,15 @@ function frameRate(value) {
   return num / den;
 }
 
-// JSON ffprobe → {width, height, fps, durationSec, audio: [{sampleRate}]}.
+function bitRateOf(video, format) {
+  const stream = video ? parseNumber(video.bit_rate) : null;
+  if (Number.isFinite(stream) && stream > 0) return { videoBitRate: stream, bitRateSource: 'stream' };
+  const container = video ? parseNumber(format?.bit_rate) : null;
+  if (Number.isFinite(container) && container > 0) return { videoBitRate: container, bitRateSource: 'format' };
+  return { videoBitRate: null, bitRateSource: null };
+}
+
+// JSON ffprobe → {width, height, fps, durationSec, audio: [{sampleRate}], videoBitRate, bitRateSource}.
 function parseProbe(stdout) {
   let probe;
   try {
@@ -95,12 +110,14 @@ function parseProbe(stdout) {
     durationSec: parseNumber(video?.duration) ?? formatDuration,
     audio: audio.map((stream) => ({ sampleRate: Number(stream.sample_rate) })),
     hasVideo: Boolean(video),
+    // Битрейт видео: из потока, иначе из контейнера (тогда со звуком – завышен на долю звука).
+    ...bitRateOf(video, probe?.format),
   };
 }
 
 function probeArgs(videoPath) {
   return ['-v', 'error', '-show_entries',
-    'stream=codec_type,width,height,avg_frame_rate,r_frame_rate,sample_rate,duration:format=duration',
+    'stream=codec_type,width,height,avg_frame_rate,r_frame_rate,sample_rate,duration,bit_rate:format=duration,bit_rate',
     '-of', 'json', hostPath(videoPath)];
 }
 
@@ -201,7 +218,32 @@ function evaluateMotionPreview({ probe, blackSegments, loudness, fullRange, edge
         + `заново нормализуйте саундтрек (loudnorm TP=-1.5) по ${AUDIO_RECIPE} и пересоберите preview`,
     }));
   }
+  checks.push(bitrateCheck(probe, expected));
   return { checks, block: checks.some((item) => item.status === 'fail') };
+}
+
+// Битрейт видео: warn выше порога (формула – у BITRATE_REF_BPS), никогда не fail.
+function bitrateCheck(probe, expected) {
+  const width = probe.width || expected.width;
+  const height = probe.height || expected.height;
+  const fps = Number.isFinite(probe.fps) && probe.fps > 0 ? probe.fps : expected.fps;
+  const limitBps = BITRATE_REF_BPS * ((width * height) / BITRATE_REF_PIXELS) * (fps / BITRATE_REF_FPS);
+  const mbit = (bps) => round(bps / 1e6, 1);
+  const limit = `≤ ${sec(mbit(limitBps))} Мбит/с (20 Мбит/с для 1080x1920 30 fps, по площади кадра и fps)`;
+  const rate = probe.videoBitRate;
+  if (!Number.isFinite(rate) || !Number.isFinite(limitBps)) {
+    return check('video-bitrate', 'skipped', { limit, message: 'ffprobe не вернул bit_rate видео – размер файла не оценить' });
+  }
+  const from = probe.bitRateSource === 'format' ? ' (по контейнеру, со звуком)' : '';
+  if (rate <= limitBps) {
+    return check('video-bitrate', 'pass', { measured: mbit(rate), limit, message: `битрейт видео ${sec(mbit(rate))} Мбит/с${from} – в норме` });
+  }
+  return check('video-bitrate', 'warn', {
+    measured: mbit(rate), limit,
+    message: `битрейт видео ${sec(mbit(rate))} Мбит/с${from} выше ${sec(mbit(limitBps))} – файл будет тяжёлым. Вероятная `
+      + 'причина – полнокадровый шум, который h264 не сжимает: анимированное зерно, шум или мерцание фона. '
+      + 'Уберите зерно на светлом фоне или сделайте его неподвижным',
+  });
 }
 
 // Замер файла: ffprobe, затем один проход ffmpeg. deps.captureImpl – подмена captureToolResult в тестах.
@@ -230,7 +272,7 @@ function reportLabel(range) {
 }
 
 function formatMotionReport(result) {
-  const icons = { pass: '✅', fail: '❌', skipped: '⏭️' };
+  const icons = { pass: '✅', fail: '❌', skipped: '⏭️', warn: '⚠️' };
   const lines = [`Проверки motion-preview: ${result.block ? 'СТОП – preview не опубликован' : 'всё хорошо'}`];
   for (const item of result.checks) {
     const scalar = item.measured !== null && typeof item.measured !== 'object' ? ` (${item.measured})` : '';
@@ -286,6 +328,7 @@ function runMotionPreviewGates({ projectDir, videoPath, expected, range }, deps 
 }
 
 module.exports = {
+  BITRATE_REF_BPS,
   BLACKDETECT_FILTER,
   EBUR128_FILTER,
   LOUDNESS_TARGET,
