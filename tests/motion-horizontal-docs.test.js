@@ -71,8 +71,11 @@ test('README и CHANGELOG: --aspect с --brief/--script отклоняется, 
   const readme = read('README.md');
   assert.doesNotMatch(readme, /`--aspect` работает с `--project-dir`/u);
   assert.match(readme, /--aspect[\s\S]{0,400}--brief[\s\S]{0,40}--script[\s\S]{0,60}отклоняется/u);
-  const unreleased = read('CHANGELOG.md').split('## [1.')[0];
-  assert.match(unreleased, /### Добавлено[\s\S]*16:9/u);
+  const log = read('CHANGELOG.md');
+  const start = log.indexOf('## [1.23.0]');
+  assert.ok(start >= 0, 'CHANGELOG: нет секции 1.23.0');
+  const release = log.slice(start, log.indexOf('\n## [', start + 5));
+  assert.match(release, /### Добавлено[\s\S]*16:9/u);
 });
 
 test('ARCHITECTURE: оговорка про карточку 16:9 и нет осиротевшей строки', () => {

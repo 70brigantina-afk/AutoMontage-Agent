@@ -90,8 +90,10 @@ test('зерно: только на тёмном фоне и неподвижн�
   assert.match(read('docs/SCENE-CATALOG.md'), /тёмн/u);
   assert.match(read('docs/MOTION-KIT.md'), /`video-bitrate`/u);
   const log = read('CHANGELOG.md');
-  const unreleased = log.slice(log.indexOf('## [Unreleased]'), log.indexOf('\n## [', log.indexOf('## [Unreleased]') + 5));
-  assert.match(unreleased, /### Исправлено/u);
-  assert.match(unreleased, /зерн/u);
-  assert.match(unreleased, /video-bitrate/u);
+  const start = log.indexOf('## [1.23.0]');
+  assert.ok(start >= 0, 'CHANGELOG: нет секции 1.23.0');
+  const release = log.slice(start, log.indexOf('\n## [', start + 5));
+  assert.match(release, /### Исправлено/u);
+  assert.match(release, /зерн/u);
+  assert.match(release, /video-bitrate/u);
 });
