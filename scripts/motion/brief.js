@@ -164,6 +164,19 @@ function resolvedTransitionFrames(transition, fps) {
   return { length, lead: transition.type === 'push' ? Math.floor(length / 2) : 0 };
 }
 
+// aspect должен совпадать с реальным размером кадра: горизонталь 16:9 – шире, чем выше; вертикаль – наоборот.
+function aspectErrors(output) {
+  const { aspect, width, height } = output || {};
+  if (!Number.isInteger(width) || !Number.isInteger(height)) return [];
+  if (aspect === 'horizontal' && width <= height) {
+    return [`output.aspect: для horizontal ширина должна быть больше высоты (сейчас ${width}x${height}); горизонтальный ролик – 1920x1080`];
+  }
+  if (aspect === 'vertical' && height <= width) {
+    return [`output.aspect: для vertical высота должна быть больше ширины (сейчас ${width}x${height}); вертикальный ролик – 1080x1920`];
+  }
+  return [];
+}
+
 function validateMotionBrief(brief, { requireApproved = false } = {}) {
   const errors = schemaErrors(brief);
   const scenes = Array.isArray(brief?.scenes) ? brief.scenes : [];
@@ -173,6 +186,7 @@ function validateMotionBrief(brief, { requireApproved = false } = {}) {
   if (typeof brief?.source === 'string' && !isCanonicalMotionReference(brief.source)) {
     errors.push('source: ссылка на narration должна быть канонической относительной внутри проекта');
   }
+  errors.push(...aspectErrors(brief?.output));
   if (brief?.status === 'draft' && brief.approval) errors.push('draft cannot carry an approval receipt');
   if (brief?.audioRole === 'music' && brief.music) {
     errors.push('music: a music-only reel uses the source audio as its soundtrack; mix extra music into the source');

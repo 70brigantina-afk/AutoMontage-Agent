@@ -212,6 +212,17 @@ workspace, включая явный `--project-dir` и установку npm �
 Optional `media.frame` у video равен `card` (по умолчанию: клип в карточке сцены) или `full`
 (клип на весь кадр без рамки и зума сцены, без `overlayText` и `caption`).
 
+### Горизонтальный ролик 16:9: `--aspect`
+
+По умолчанию motion-черновик вертикальный, 1080×1920. Флаг `--aspect horizontal` создаёт
+черновик 1920×1080 (`output.aspect: "horizontal"` в ТЗ); работает и с `--music-only`.
+Допустимы `vertical` и `horizontal`, другое значение – ошибка с кодом 2. Валидатор ТЗ сверяет
+`aspect` с размером кадра: horizontal требует ширину больше высоты, vertical – наоборот.
+
+```bash
+automontage motion narration.wav --project "Обзор" --aspect horizontal
+```
+
 ### Ролик без речи: `--music-only`
 
 Для музыкального ролика без голоса источник – готовый смешанный саундтрек (музыка, удары,
