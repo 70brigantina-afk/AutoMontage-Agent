@@ -107,7 +107,7 @@ export const MotionDirector = ({ theme = 'motion-neutral', scenes = [], audioSrc
     {draftPreview && <div data-draft-preview-watermark="true" style={{ position: 'absolute',
       top: '5%', left: '7%', zIndex: 1000, padding: '10px 18px', borderRadius: 8,
       color: motionTheme.ink, background: motionTheme.panel, fontWeight: 800,
-      fontSize: width * 0.03, opacity: 0.8,
+      fontSize: Math.min(width, height) * 0.03, opacity: 0.8,
     }}>ЧЕРНОВИК</div>}
   </AbsoluteFill>;
 };
