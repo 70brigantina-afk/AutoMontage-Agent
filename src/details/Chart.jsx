@@ -1,13 +1,12 @@
 import { useCurrentFrame, useVideoConfig } from 'remotion';
 import { evolvePath } from '@remotion/paths';
 import { formatNumber } from './odometer.js';
-import { barGrowth, barToLine, barToLineStart, chartLayout, lineProgress, linePath } from './chart.js';
+import { barGrowth, barShape, barToLine, barToLineStart, chartLayout, dotShape, lineProgress, linePath } from './chart.js';
 
 const VALUE_ROW = 56;
 const LABEL_ROW = 130;
 const UNIT_ROW = 44;
 const BASE_WIDTH = 4;
-const DOT = 28;
 
 const baseSize = (count) => (count <= 3 ? 34 : count <= 5 ? 28 : 22);
 const fitSize = (size, slot, chars) => Math.max(12, Math.min(size, Math.floor(slot / (Math.max(1, chars) * 0.62))));
@@ -50,19 +49,16 @@ export const Chart = ({
         style={{ position: 'absolute', left: 0, top: 0 }}>
         {bars.map((bar, index) => {
           if (dotsOnly) {
-            return <circle key={index} data-chart-dot="true" cx={bar.x + bar.w / 2} cy={bar.y}
-              r={(DOT / 2) * growth[index]} fill={colorOf(index)} />;
+            const dot = dotShape(bar, growth[index]);
+            return <circle key={index} data-chart-dot="true" cx={dot.cx} cy={dot.cy} r={dot.r}
+              fill={colorOf(index)} />;
           }
-          const scale = chartType === 'bar-to-line' ? morph.barScale : 1;
-          const full = bar.h * growth[index];
-          const zero = bar.h === 0;
-          // Нулевой столбик – короткая полоска на линии основания; остальные сжимаются к верхушке.
-          const barHeight = zero ? BASE_WIDTH * 1.5 : scale === 1 || full < DOT ? full : DOT + (full - DOT) * scale;
-          const barWidth = DOT + (bar.w - DOT) * scale;
-          const top = zero ? baseline - barHeight : scale === 1 ? baseline - full : bar.y;
-          return <rect key={index} data-chart-bar="true" x={bar.x + (bar.w - barWidth) / 2} y={top}
-            width={Math.max(0, barWidth)} height={Math.max(0, barHeight)}
-            rx={Math.min(12, barWidth / 2)} fill={colorOf(index)} />;
+          const shape = barShape(bar, {
+            growth: growth[index], baseline, scale: chartType === 'bar-to-line' ? morph.barScale : 1,
+          });
+          return <rect key={index} data-chart-bar="true" x={shape.x} y={shape.y}
+            width={Math.max(0, shape.width)} height={Math.max(0, shape.height)}
+            rx={Math.max(0, shape.rx)} fill={colorOf(index)} />;
         })}
         <line data-chart-baseline="true" x1="0" x2={width} y1={baseline + BASE_WIDTH / 2} y2={baseline + BASE_WIDTH / 2}
           stroke={ink} strokeWidth={BASE_WIDTH} strokeLinecap="round" />

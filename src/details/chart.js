@@ -4,6 +4,8 @@ const SHRINK_FRAMES_25 = 8;
 const DRAW_FRAMES_25 = 15;
 const HOLD_FRAMES_25 = 10;
 const BAR_SHARE = 0.6;
+export const DOT_SIZE = 28;
+const BASE_THICKNESS = 4;
 
 const clamp01 = (value) => Math.max(0, Math.min(1, value));
 const easeOut = (value) => 1 - (1 - clamp01(value)) ** 3;
@@ -63,11 +65,42 @@ export const barToLine = (frame, fps, startFrame) => {
 };
 
 // Кадр, с которого столбики сжимаются: после роста последнего и короткой паузы,
-// но так, чтобы линия дорисовалась до последнего кадра сцены (если длительность известна).
+// но так, чтобы линия дорисовалась не позже последнего кадра сцены (если длительность известна).
+// В короткой сцене сжатие начинается раньше и может накладываться на хвост роста столбиков
+// (фигура учитывает неполный рост). Если сцена короче сжатия и прорисовки вместе
+// (23 кадра эталона 25 fps), старт зажимается в 0 и линия дорисуется, сколько хватит кадров.
 export const barToLineStart = (count, fps, { stepFrames25 = 5, durationInFrames } = {}) => {
   const grown = Math.max(0, count - 1) * stepOf(stepFrames25, fps) + barGrowthFrames(fps);
   const wanted = grown + ref25(HOLD_FRAMES_25, fps);
   if (!Number.isFinite(durationInFrames)) return wanted;
   const latest = durationInFrames - 1 - ref25(SHRINK_FRAMES_25, fps) - ref25(DRAW_FRAMES_25, fps);
-  return Math.max(grown, Math.min(wanted, latest));
+  return Math.max(0, Math.min(wanted, latest));
+};
+
+// Точка линии: круг с центром в вершине линии (cx, bar.y).
+export const dotShape = (bar, growth = 1) => ({ cx: bar.x + bar.w / 2, cy: bar.y, r: (DOT_SIZE / 2) * growth });
+
+// Прямоугольник столбика при масштабе сжатия scale (1 – столбик, 0 – точка). Форма линейно
+// переходит в ту же геометрию, что и dotShape, поэтому при смене на круг нет скачка.
+export const barShape = (bar, { growth = 1, scale = 1, baseline } = {}) => {
+  const full = bar.h * growth;
+  const zero = bar.h === 0;
+  const start = zero
+    ? { top: baseline - BASE_THICKNESS * 1.5, height: BASE_THICKNESS * 1.5 }
+    : { top: baseline - full, height: full };
+  const rx0 = Math.min(12, bar.w / 2);
+  if (scale >= 1) {
+    return { x: bar.x, y: start.top, width: bar.w, height: start.height, rx: rx0 };
+  }
+  const dot = dotShape(bar, growth);
+  const size = dot.r * 2;
+  const mix = (a, b) => b + (a - b) * scale;
+  const width = mix(bar.w, size);
+  return {
+    x: dot.cx - width / 2,
+    y: mix(start.top, dot.cy - dot.r),
+    width,
+    height: mix(start.height, size),
+    rx: Math.min(mix(rx0, dot.r), width / 2),
+  };
 };

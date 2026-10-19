@@ -85,6 +85,40 @@ test('barToLine: bars shrink in 8 frames, then the line draws in 15 frames (25 f
   assert.equal(barToLine(500, 25, 10).lineProgress, 1);
 });
 
+test('barShape: the last shrink frame equals the dot, with no jump at the swap', () => {
+  const { chartLayout, barShape, barToLine, dotShape, barGrowth } = math();
+  const { bars, baseline } = chartLayout(pts(10, 20, 40, 0), { width: 800, height: 400, padding: { top: 56, bottom: 130 } });
+  const fps = 25;
+  const start = 40;
+  bars.forEach((bar, index) => {
+    const growth = barGrowth(start + 8, fps, index);
+    const last = barShape(bar, { growth, scale: barToLine(start + 8, fps, start).barScale, baseline });
+    const dot = dotShape(bar, growth);
+    assert.equal(last.x + last.width / 2, dot.cx);
+    assert.equal(last.y + last.height / 2, dot.cy);
+    assert.equal(last.width, dot.r * 2);
+    assert.equal(last.height, dot.r * 2);
+    assert.equal(last.rx, dot.r);
+    assert.equal(dot.cy, bar.y);
+    // в начале сжатия фигура – обычный столбик
+    const first = barShape(bar, { growth: 1, scale: 1, baseline });
+    assert.equal(first.width, bar.w);
+  });
+});
+
+test('barToLineStart: the line finishes by the last frame even in a short scene', () => {
+  const { barToLineStart, barToLine } = math();
+  for (const [count, duration, fps] of [[8, 90, 25], [8, 60, 25], [8, 120, 50], [2, 200, 25], [5, 45, 30]]) {
+    const start = barToLineStart(count, fps, { durationInFrames: duration });
+    assert.equal(barToLine(duration - 1, fps, start).lineProgress, 1, `${count}/${duration}/${fps}`);
+    assert.ok(start >= 0);
+  }
+  // длинная сцена: пауза после роста сохраняется
+  assert.equal(barToLineStart(3, 25, { durationInFrames: 500 }), 2 * 5 + 12 + 10);
+  // сцена короче 8+15 кадров: сжатие начинается с кадра 0
+  assert.equal(barToLineStart(8, 25, { durationInFrames: 10 }), 0);
+});
+
 function renderChart(frame, props) {
   const { Chart } = loadMotion('src/details/Chart.jsx', { useCurrentFrame: () => frame });
   return renderToStaticMarkup(React.createElement(Chart, { width: 800, height: 600, ...props }));
