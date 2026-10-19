@@ -14,7 +14,7 @@
   safe-зоне `SAFE_16x9`; карточка `media` в 16:9 всегда вписывает видео (`contain`), вертикаль не
   изменилась. Телефонный лист критика у горизонтали – 640 px на кадр (у вертикали 360 px), формат
   записан в индексе кадров. Пакет `ai-promo` и навыки `motion-reel`/`ai-promo` описывают 16:9:
-  `ASPECT` в `tokens.js`, `render.cjs --aspect`, кадры Higgsfield 16:9.
+  `ASPECT` в `tokens.js`, `render.cjs --aspect` и `--brief` (сверка с `output.aspect` ТЗ), кадры Higgsfield 16:9.
 
 ### Исправлено
 

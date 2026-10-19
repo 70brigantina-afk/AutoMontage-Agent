@@ -92,3 +92,47 @@ test('новые документы без длинного тире (U+2014) и
     assert.doesNotMatch(read(file), /\/Users\/|\/home\//u, file);
   }
 });
+
+// ---- render.cjs: сверка формата пакета (ASPECT) с --aspect и ТЗ ----
+const os = require('node:os');
+const { checkPackAspect } = require(path.join(ROOT, PACK, 'render.cjs'));
+
+function writeBrief(aspect) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pack-aspect-'));
+  const file = path.join(dir, 'brief.json');
+  fs.writeFileSync(file, JSON.stringify({ output: aspect ? { aspect } : {} }));
+  return file;
+}
+
+test('render.cjs: ТЗ horizontal при ASPECT vertical – ошибка', () => {
+  assert.throws(() => checkPackAspect({ ASPECT: 'vertical' }, ['--brief', writeBrief('horizontal')]), /output\.aspect.*horizontal.*ASPECT/u);
+});
+
+test('render.cjs: ТЗ и ASPECT совпадают – без ошибки; ТЗ без aspect = vertical', () => {
+  assert.doesNotThrow(() => checkPackAspect({ ASPECT: 'horizontal' }, ['--brief', writeBrief('horizontal')]));
+  assert.doesNotThrow(() => checkPackAspect({ ASPECT: 'vertical' }, ['--brief', writeBrief(null)]));
+  assert.doesNotThrow(() => checkPackAspect({ ASPECT: 'vertical' }, []));
+});
+
+test('render.cjs: --aspect расходится с ASPECT – ошибка; совпадает – ok', () => {
+  assert.throws(() => checkPackAspect({ ASPECT: 'vertical' }, ['--aspect', 'horizontal']), /ASPECT/u);
+  assert.doesNotThrow(() => checkPackAspect({ ASPECT: 'horizontal' }, ['--aspect', 'horizontal']));
+});
+
+test('render.cjs: опечатка в ASPECT отклоняется', () => {
+  assert.throws(() => checkPackAspect({ ASPECT: 'Horizontal' }, []), /ASPECT/u);
+  assert.throws(() => checkPackAspect({}, []), /ASPECT/u);
+});
+
+test('render.cjs: --brief без читаемого файла – понятная ошибка', () => {
+  assert.throws(() => checkPackAspect({ ASPECT: 'vertical' }, ['--brief']), /--brief/u);
+  assert.throws(() => checkPackAspect({ ASPECT: 'vertical' }, ['--brief', '/nonexistent/x.json']), /--brief/u);
+});
+
+test('ai-promo: шаги 9-10 и engine-path требуют ASPECT = output.aspect и --brief', () => {
+  for (const file of ['skills/ai-promo/SKILL.md', 'skills/ai-promo/references/engine-path.md']) {
+    const text = read(file);
+    assert.match(text, /`ASPECT`[^\n]*`output\.aspect`/u, file);
+    assert.ok(text.includes('--brief'), file);
+  }
+});

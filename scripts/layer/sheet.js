@@ -27,6 +27,7 @@ const CRITIC_LONG_SIDE = 720;
 const PHONE_WIDTH = 360;
 const PHONE_WIDTH_HORIZONTAL = 640;
 const phoneWidth = (width, height) => (height > width ? PHONE_WIDTH : PHONE_WIDTH_HORIZONTAL);
+// Квадратный кадр (width == height) попал бы в 'horizontal' и 640 px; валидатор ТЗ квадрат отклоняет, ветка недостижима.
 // Формат кадра для индекса: критик узнаёт из него, вертикаль перед ним или горизонталь.
 const frameFormat = (width, height) => ({ aspect: height > width ? 'vertical' : 'horizontal', width, height });
 const SHEET_COLUMNS = 4;

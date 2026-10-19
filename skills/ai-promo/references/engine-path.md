@@ -46,11 +46,15 @@ node -e "const m=require('./projects/<id>/brief/v01-draft.motion.json');console.
 `ceil(длительность саундтрека × 30)`. Сумма сцен `PLAN` в `index.jsx` обязана закончиться
 ровно на `TOTAL` (пакет сам проверяет это при рендере).
 
+`ASPECT` в `tokens.js` = `output.aspect` ТЗ. Шаблон вертикальный (сцены скомпонованы под 1080×1920):
+для 16:9 поставь `'horizontal'` и перекомпонуй сцены, иначе `fit: cover` обрежет вертикальный
+клип примерно до трети высоты. Рендер с `--brief` проверяет это за тебя.
+
 ## 3. Рендер пакета
 
 ```bash
 node projects/<id>/motion-vNN/stills.cjs 0 90 300 600      # контрольные кадры, каждый < TOTAL
-node projects/<id>/motion-vNN/render.cjs                    # полный рендер без звука
+node projects/<id>/motion-vNN/render.cjs --brief projects/<id>/brief/vNN-draft.motion.json   # полный рендер без звука
 ```
 
 `render.cjs` ждёт слот общей очереди, рендерит композицию `Promo` с `withAudio=false` и

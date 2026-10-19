@@ -92,9 +92,11 @@ OAuth MCP пользователя, остальное работает лока
    У Veo-клипов есть свой звук – в пакете они всегда `muted`, а `media`-сцена – `audioMode: mute`.
 9. **Motion-пакет.** Скопируй [`templates/motion-pack/`](templates/motion-pack/README.md) в
    `projects/<id>/motion-vNN/`, положи клипы в `public/clips/`, `TOTAL` = `durationInFrames`
-   scaffold brief, замени заглушки текстом из `copy.md`, адаптируй ДНК дизайна. Эффекты и
+   scaffold brief, `ASPECT` = `output.aspect` ТЗ (шаблон вертикальный; для 16:9 поставь `'horizontal'` и
+   перекомпонуй сцены под 1920×1080, иначе клип обрежется), замени заглушки текстом из `copy.md`, адаптируй ДНК дизайна. Эффекты и
    правила стиля – [vfx-kit.md](references/vfx-kit.md). Контрольные кадры – `stills.cjs`.
-10. **Рендер пакета.** `node projects/<id>/motion-vNN/render.cjs`: ровно `durationInFrames`
+10. **Рендер пакета.** `node projects/<id>/motion-vNN/render.cjs --brief brief/vNN-draft.motion.json`
+    (флаг сверяет `ASPECT` с `output.aspect` ТЗ и останавливает рендер при расхождении): ровно `durationInFrames`
     кадров, `withAudio=false`, без звуковой дорожки. Скопируй рендер в `assets/`, посчитай SHA-256.
 11. **Media-сцена.** Draft brief: одна `media`-сцена `start 0`, `end` = длительность,
     `fit: cover`, `audioMode: mute`, `frame: "full"` (клип на весь кадр 1080×1920, у горизонтали
