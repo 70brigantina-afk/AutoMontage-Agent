@@ -653,6 +653,32 @@ function gateSfxDensity(manifest, profile) {
   });
 }
 
+// G16: вставка, растущая из элемента (inserts[].origin), и наезд камеры на элемент
+// (camera.pushes[].target) опираются на элемент, который виден в кадре своего начала. Kit ставит
+// originBox/box = null, когда элемент к этому кадру ещё не появился или уже ушёл: рендер тогда
+// не падает (карточка из safe-зоны, наезд пропускается), но задумка автора не исполнена – стоп.
+// Старый манифест без этих полей проходит.
+function gateAnchors(manifest) {
+  const { fps } = manifest;
+  const issues = [];
+  for (const insert of Array.isArray(manifest.inserts) ? manifest.inserts : []) {
+    if (typeof insert.origin === 'string' && insert.origin && !insert.originBox) {
+      issues.push({ frame: insert.from, item: span(insert.from, insert.from + 1, fps, `${insert.id}: элемент «${insert.origin}» не виден к началу вставки`) });
+    }
+  }
+  const pushes = manifest.camera && Array.isArray(manifest.camera.pushes) ? manifest.camera.pushes : [];
+  for (const push of pushes) {
+    if (!push || push.box) continue;
+    issues.push({ frame: push.from, item: span(push.from, push.from + 1, fps, `наезд камеры: элемент «${push.target}» не виден к началу наезда`) });
+  }
+  issues.sort((a, b) => a.frame - b.frame);
+  return gate('G16', 'Опора вставки и наезда', {
+    status: issues.length ? 'fail' : 'pass', value: issues.length, unit: 'шт.', threshold: 'элемент виден в кадре начала',
+    spans: issues.slice(0, 5).map((i) => i.item),
+    hint: 'origin и target – id элемента из items, который уже на экране в кадре начала вставки или наезда: сдвиньте at элемента раньше или начало вставки/наезда позже',
+  });
+}
+
 // Все гейты по манифесту в фиксированном порядке (D3 в context.md) – вызывается `layer check`
 // (Task 32). Форма манифеста проверяется здесь один раз, первым делом, до любого гейта (camera-
 // массивы, texts, cues, inserts): испорченный manifest.json обязан упасть с понятным «манифест
@@ -672,11 +698,12 @@ function runTimelineGates(manifest, profile) {
     gateSfxDensity(manifest, profile),
     gateStock(manifest, profile),
     gateDonor(manifest, profile),
+    gateAnchors(manifest),
   ];
   return applyWaivers(gates, manifest.waivers || []);
 }
 
 module.exports = {
-  assertCameraArrays, assertCues, assertInserts, detectCameraEvents, gateDonor, gateHook, gateRhythm,
+  assertCameraArrays, assertCues, assertInserts, detectCameraEvents, gateAnchors, gateDonor, gateHook, gateRhythm,
   gateSafeZone, gateScale, gateSfxDensity, gateStock, gateWeakCuts, runTimelineGates, speakerPlans,
 };

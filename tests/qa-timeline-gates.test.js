@@ -1801,10 +1801,10 @@ test('gateSfxDensity validates cues itself, even called directly outside runTime
 
 // --- runTimelineGates: весь манифест одним прогоном, порядок гейтов и исключения ---
 
-test('runTimelineGates returns G1–G5, G9–G11 in order and applies waivers', () => {
+test('runTimelineGates returns G1–G5, G9–G11, G16 in order and applies waivers', () => {
   const m = manifestFixture({ camera: (f) => ({ s: f < 125 ? 1 : 1.18 }), waivers: [{ gate: 'G1', reason: 'длинная пауза по правке владельца' }] });
   const gates = runTimelineGates(m, avatar);
-  assert.deepEqual(gates.map((g) => g.id), ['G1', 'G2', 'G3', 'G4', 'G5', 'G9', 'G10', 'G11']);
+  assert.deepEqual(gates.map((g) => g.id), ['G1', 'G2', 'G3', 'G4', 'G5', 'G9', 'G10', 'G11', 'G16']);
   assert.equal(gates[0].status, 'waived');
 });
 

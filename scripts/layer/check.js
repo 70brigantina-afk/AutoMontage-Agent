@@ -1,5 +1,5 @@
 // automontage layer check – гейты по плану слоя за секунды, без рендера: plan.js → манифест kit →
-// G1–G5, G9–G11. Пишет <слой>/out/manifest.json (по нему layer render судит звук) и qa-отчёт.
+// G1–G5, G9–G11, G16. Пишет <слой>/out/manifest.json (по нему layer render судит звук) и qa-отчёт.
 // Манифест пишется до гейтов, поэтому кадры критика (layer sheet --source stills) смотрят ещё и отчёт
 // qa/layer-<слой>-check.json: без провала и именно к этому манифесту (inputs[role=manifest].sha256).
 // Код: 0 – пройдено или только предупреждения, 1 – стоп, 2 – оценить нельзя.

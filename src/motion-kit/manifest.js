@@ -3,6 +3,8 @@ import { captionSpans } from './captions.js';
 import { itemExtentAt } from './motion.js';
 
 const r3 = (value) => Math.round(value * 1000) / 1000;
+// Рамка {x, y, w, h} в манифесте – [left, top, right, bottom], как кадры texts; null остаётся null.
+const boxArray = (box) => (box ? [r3(box.x), r3(box.y), r3(box.x + box.w), r3(box.y + box.h)] : null);
 
 // Сериализуемый снимок слоя: камера и габариты текста по кадрам, вставки, звуки, хук, исключения.
 export function buildManifest(compiled) {
@@ -20,6 +22,15 @@ export function buildManifest(compiled) {
     camera.dy.push(r3(c.dy));
     camera.blur.push(r3(c.blur));
     camera.opacity.push(r3(c.opacity));
+  }
+  // Наезды на элементы: G16 читает box (null – цель не видна к началу наезда, рендер его пропускает),
+  // лист ключевых моментов (scripts/qa/key-moments.js) ставит кадр на конец наезда. Без наездов ключа
+  // нет – манифест слоя без них прежний.
+  const pushes = compiled.camera.pushes || [];
+  if (pushes.length) {
+    camera.pushes = pushes.map((push) => ({
+      target: push.target, from: push.from, to: push.until, frames: push.frames, k: push.k, box: boxArray(push.box),
+    }));
   }
   const texts = compiled.items.filter((item) => item.kind !== 'media' && !item.bleed).map((item) => {
     const frames = [];
@@ -52,7 +63,12 @@ export function buildManifest(compiled) {
     texts,
     // cover и src – с Task 22: G4 читает cover (закрыта ли вставкой сцена под ней), Task 38 читает
     // src в предупреждении о коротком стоковом файле.
-    inserts: compiled.inserts.map((insert) => ({ id: insert.id, kind: insert.kind, from: insert.from, to: insert.to, cover: insert.cover, src: insert.src })),
+    // origin/originBox – только у вставки из элемента кадра (у остальных манифест прежний): G16 читает
+    // originBox (null – элемент не виден к началу вставки, рендер берёт карточку safe-зоны).
+    inserts: compiled.inserts.map((insert) => ({
+      id: insert.id, kind: insert.kind, from: insert.from, to: insert.to, cover: insert.cover, src: insert.src,
+      ...(insert.origin ? { origin: insert.origin, originBox: boxArray(insert.originBox) } : {}),
+    })),
     cues: {
       // durationFrames (Task 25 review): kit уже считает его в src/motion-kit/sfx.js, но манифест
       // раньше его не отдавал – G7 (Task 26) без него не может построить окно [startFrame,

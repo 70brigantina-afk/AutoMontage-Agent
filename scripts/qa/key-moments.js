@@ -41,6 +41,13 @@ function momentsFromManifest(manifest, { fromSec = 0, durationSec } = {}) {
     const ref = refOf(insert, 'insert', index);
     add(place(insert.from / fps + EVENT_DELAY_SEC, 'event', ref, `${ref}: вставка`, range));
   });
+  // Наезд камеры на элемент: кадр на конце наезда, когда камера уже стоит на цели.
+  const pushes = manifest.camera && Array.isArray(manifest.camera.pushes) ? manifest.camera.pushes : [];
+  pushes.forEach((push, index) => {
+    if (!push || !finite(push.from)) return;
+    const ref = typeof push.target === 'string' && push.target.trim() ? push.target : `push-${index + 1}`;
+    add(place((push.from + (finite(push.frames) ? push.frames : 0)) / fps, 'event', ref, `${ref}: наезд`, range));
+  });
   const kept = manifest.cues && Array.isArray(manifest.cues.kept) ? manifest.cues.kept : [];
   kept.forEach((cue, index) => {
     if (!cue || cue.notable !== true || !finite(cue.hitFrame)) return;

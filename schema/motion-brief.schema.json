@@ -151,6 +151,20 @@
     "bodyText": { "type": "string", "minLength": 1, "maxLength": 240 },
     "startTime": { "type": "number", "minimum": 0 },
     "endTime": { "type": "number", "exclusiveMinimum": 0 },
+    "sceneTransition": {
+      "description": "Вход в эту сцену из предыдущей. cut – жёсткая склейка (по умолчанию). frames – длительность в кадрах эталона 25 fps (6–15, по умолчанию 10), пересчитывается под FPS ролика. direction – куда движется кадр, только для slide и wipe (по умолчанию left), left – новая сцена въезжает справа. Сцена начинается в start: fade, slide и wipe в этом кадре только начинают её проявлять; предыдущая сцена тянется до start (через паузу, если она есть) и на хвост перехода стоп-кадром. push – жёсткая склейка ровно в start с коротким наездом на обеих сценах и вспышкой цвета #f5f2ed (до 20 %), начинается на floor(frames/2) кадров раньше start.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["cut", "fade", "slide", "wipe", "push"] },
+        "frames": {
+          "description": "Длительность в кадрах эталона 25 fps (6–15, по умолчанию 10), не в кадрах ролика: при 60 fps 15 означает 36 кадров ролика. Поэтому пределы не зависят от FPS.",
+          "type": "integer", "minimum": 6, "maximum": 15
+        },
+        "direction": { "enum": ["left", "right", "up", "down"] }
+      }
+    },
     "kineticTitleScene": {
       "type": "object",
       "additionalProperties": false,
@@ -159,6 +173,7 @@
         "scene": { "const": "kinetic-title" },
         "start": { "$ref": "#/definitions/startTime" },
         "end": { "$ref": "#/definitions/endTime" },
+        "transition": { "$ref": "#/definitions/sceneTransition" },
         "caption": { "$ref": "#/definitions/captionText" },
         "text": { "$ref": "#/definitions/titleText" },
         "emphasis": { "type": "string", "minLength": 1, "maxLength": 40 }
@@ -172,6 +187,7 @@
         "scene": { "const": "card" },
         "start": { "$ref": "#/definitions/startTime" },
         "end": { "$ref": "#/definitions/endTime" },
+        "transition": { "$ref": "#/definitions/sceneTransition" },
         "caption": { "$ref": "#/definitions/captionText" },
         "title": { "$ref": "#/definitions/shortText" },
         "body": { "$ref": "#/definitions/bodyText" }
@@ -185,6 +201,7 @@
         "scene": { "const": "steps" },
         "start": { "$ref": "#/definitions/startTime" },
         "end": { "$ref": "#/definitions/endTime" },
+        "transition": { "$ref": "#/definitions/sceneTransition" },
         "caption": { "$ref": "#/definitions/captionText" },
         "title": { "$ref": "#/definitions/shortText" },
         "steps": {
@@ -203,6 +220,7 @@
         "scene": { "const": "list" },
         "start": { "$ref": "#/definitions/startTime" },
         "end": { "$ref": "#/definitions/endTime" },
+        "transition": { "$ref": "#/definitions/sceneTransition" },
         "caption": { "$ref": "#/definitions/captionText" },
         "title": { "$ref": "#/definitions/shortText" },
         "items": {
@@ -221,6 +239,7 @@
         "scene": { "const": "counter" },
         "start": { "$ref": "#/definitions/startTime" },
         "end": { "$ref": "#/definitions/endTime" },
+        "transition": { "$ref": "#/definitions/sceneTransition" },
         "caption": { "$ref": "#/definitions/captionText" },
         "label": { "$ref": "#/definitions/shortText" },
         "value": { "type": "number" },
@@ -236,6 +255,7 @@
         "scene": { "const": "media" },
         "start": { "$ref": "#/definitions/startTime" },
         "end": { "$ref": "#/definitions/endTime" },
+        "transition": { "$ref": "#/definitions/sceneTransition" },
         "caption": { "$ref": "#/definitions/captionText" },
         "overlayText": { "$ref": "#/definitions/titleText" },
         "media": {
@@ -277,6 +297,7 @@
         "scene": { "const": "cta" },
         "start": { "$ref": "#/definitions/startTime" },
         "end": { "$ref": "#/definitions/endTime" },
+        "transition": { "$ref": "#/definitions/sceneTransition" },
         "caption": { "$ref": "#/definitions/captionText" },
         "title": { "$ref": "#/definitions/shortText" },
         "action": { "$ref": "#/definitions/shortText" },

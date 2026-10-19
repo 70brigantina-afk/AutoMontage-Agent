@@ -16,7 +16,8 @@ const hasFfmpeg = toolAvailable('ffmpeg') && toolAvailable('ffprobe');
 const STATIC_PLAN = "export default function buildPlan({ face }) { return { camera: { face, shots: [{ at: 0, preset: 'W', drift: 'none' }] }, items: [] }; }\n";
 
 // Подмена Remotion: ролик lavfi нужной длины и fps в полном диапазоне с теми же метками, что у настоящего
-// Remotion 4.0.504 (yuvj420p, color_range pc, colorspace bt470bg); limitedRange включает новый диапазон tv.
+// Remotion (yuvj420p, color_range pc, colorspace bt470bg; метки сняты с 4.0.504, текущая версия 4.0.536);
+// limitedRange включает новый диапазон tv.
 // audio – lavfi-строка со своей длиной d, функция, которая строит её уже во время «рендера» (манифест слоя к
 // этому моменту записан), или null – ролик без звуковой дорожки. Без -shortest: звук может быть длиннее
 // видео – настоящий Remotion дописывает хвост AAC на 43–64 мс. after – что сделать после записи файла.

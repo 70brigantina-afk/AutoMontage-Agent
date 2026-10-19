@@ -13,6 +13,14 @@ const MOTION_SCENES = [
   'cta',
 ];
 
+// Переходы между сценами: тот же список и те же значения, что в src/motion/transitions.js
+// (ESM-модуль композиции; совпадение проверяет tests/motion-transitions.test.js). frames – в кадрах
+// эталона 25 fps и пересчитываются под FPS ролика той же формулой, что ref25 в motion-kit.
+const MOTION_TRANSITION_TYPES = ['cut', 'fade', 'slide', 'wipe', 'push'];
+const TRANSITION_FRAMES_25 = { default: 10, min: 6, max: 15 };
+const DIRECTED_TRANSITIONS = new Set(['slide', 'wipe']);
+const ref25 = (frames, fps) => Math.max(1, Math.round((frames * fps) / 25));
+
 const MOTION_MEDIA_EXTENSIONS = {
   image: new Set(['.avif', '.gif', '.jpeg', '.jpg', '.png', '.webp']),
   video: new Set(['.m4v', '.mov', '.mp4', '.webm']),
@@ -77,6 +85,84 @@ function containsExecutableMarkup(value) {
   return false;
 }
 
+// Вход в сцену index из предыдущей. Содержимое сцены видно ровно в start; предыдущая сцена
+// тянется до start (через паузу, если она есть) и дальше на хвост перехода стоп-кадром. Переход
+// не длиннее самой сцены и предыдущей сцены (по их длине из ТЗ, без паузы). У push первая половина
+// (lead = floor(frames/2)) идёт до start, поэтому вход не может начаться раньше предыдущей сцены.
+function transitionErrors(scenes, index, fps) {
+  const transition = scenes[index]?.transition;
+  if (!transition || typeof transition !== 'object') return [];
+  const at = `scenes[${index}].transition`;
+  const errors = [];
+  const { type, frames, direction } = transition;
+  if (!MOTION_TRANSITION_TYPES.includes(type)) {
+    return [`${at}.type: неизвестный переход "${type}", допустимо: ${MOTION_TRANSITION_TYPES.join(', ')}`];
+  }
+  if (type === 'cut') {
+    if (frames !== undefined) errors.push(`${at}.frames: у склейки cut нет длительности – уберите frames`);
+    if (direction !== undefined) errors.push(`${at}.direction: у склейки cut нет направления – уберите direction`);
+    return errors;
+  }
+  if (index === 0) {
+    return [`${at}: у первой сцены нет предыдущей, входить не из чего – уберите transition или поставьте cut`];
+  }
+  if (direction !== undefined && !DIRECTED_TRANSITIONS.has(type)) {
+    errors.push(`${at}.direction: направление задаётся только у slide и wipe, у ${type} его нет – уберите direction`);
+  }
+  if (frames !== undefined && (!Number.isInteger(frames)
+    || frames < TRANSITION_FRAMES_25.min || frames > TRANSITION_FRAMES_25.max)) {
+    errors.push(`${at}.frames: длительность перехода ${frames} вне ${TRANSITION_FRAMES_25.min}–${TRANSITION_FRAMES_25.max} кадров при 25 fps`);
+    return errors;
+  }
+  if (!Number.isFinite(fps)) return errors;
+  const length = ref25(Number.isInteger(frames) ? frames : TRANSITION_FRAMES_25.default, fps);
+  const scene = scenes[index];
+  const prev = scenes[index - 1];
+  const bounds = (value) => (Number.isFinite(value?.start) && Number.isFinite(value?.end)
+    ? { from: Math.round(value.start * fps), to: Math.round(value.end * fps) } : null);
+  const own = bounds(scene);
+  const before = bounds(prev);
+  if (!own || !before) return errors;
+  const lead = type === 'push' ? Math.floor(length / 2) : 0;
+  // Две проверки ниже у сцен по порядку не срабатывают (own.from >= before.to, lead <= длины
+  // предыдущей сцены, start >= 0); они достижимы только у пересекающихся сцен, где уже есть ошибка
+  // «пересекается», и уточняют её для push. Оставлены как защита, если проверку порядка ослабят.
+  if (own.from - lead < before.from) {
+    errors.push(`${at}: push начинается за ${lead} кадров до start, раньше начала предыдущей сцены; укоротите frames или поставьте другой переход`);
+  }
+  if (own.from - lead < 0) {
+    errors.push(`${at}: push начинается за ${lead} кадров до start, раньше начала ролика`);
+  }
+  if (length > before.to - before.from) {
+    errors.push(`${at}: переход (${length} кадров) длиннее предыдущей сцены (${before.to - before.from} кадров)`);
+  }
+  if (length > own.to - own.from) {
+    errors.push(`${at}: переход (${length} кадров) длиннее самой сцены (${own.to - own.from} кадров)`);
+  }
+  // Вход в предыдущую сцену должен закончиться не позже, чем начнётся выход из неё в эту сцену,
+  // иначе предыдущая сцена одновременно входит и выходит и в кадре три сцены сразу.
+  const entry = index >= 2 ? resolvedTransitionFrames(prev?.transition, fps) : null;
+  if (entry) {
+    const entryEnd = before.from - entry.lead + entry.length;
+    const exitStart = own.from - lead;
+    if (entryEnd > exitStart) {
+      errors.push(`${at}: переход ${type} в scenes[${index}] начинается на кадре ${exitStart}, а переход ${prev.transition.type} в scenes[${index - 1}] ещё идёт до кадра ${entryEnd}; удлините scenes[${index - 1}] или укоротите один из переходов`);
+    }
+  }
+  return errors;
+}
+
+// Длительность в кадрах FPS ролика и lead корректного не-cut перехода; иначе null.
+function resolvedTransitionFrames(transition, fps) {
+  if (!transition || typeof transition !== 'object' || transition.type === 'cut'
+    || !MOTION_TRANSITION_TYPES.includes(transition.type)) return null;
+  const { frames } = transition;
+  if (frames !== undefined && (!Number.isInteger(frames)
+    || frames < TRANSITION_FRAMES_25.min || frames > TRANSITION_FRAMES_25.max)) return null;
+  const length = ref25(frames ?? TRANSITION_FRAMES_25.default, fps);
+  return { length, lead: transition.type === 'push' ? Math.floor(length / 2) : 0 };
+}
+
 function validateMotionBrief(brief, { requireApproved = false } = {}) {
   const errors = schemaErrors(brief);
   const scenes = Array.isArray(brief?.scenes) ? brief.scenes : [];
@@ -118,6 +204,7 @@ function validateMotionBrief(brief, { requireApproved = false } = {}) {
       && Math.round(scene.end * fps) > durationInFrames) {
       errors.push(`scenes[${index}].end: сцена выходит за длительность narration`);
     }
+    errors.push(...transitionErrors(scenes, index, fps));
     if (scene?.scene === 'media' && scene.media) {
       const { kind, src } = scene.media;
       if (!isCanonicalMotionReference(src)) {
@@ -193,10 +280,26 @@ function sceneSummary(scene) {
   return [scene.title, scene.action, scene.handle].filter(Boolean).join(' – ');
 }
 
+const DIRECTION_WORDS = { left: 'влево', right: 'вправо', up: 'вверх', down: 'вниз' };
+
+// Строка о входе в сцену для человека, который утверждает ТЗ: тип, длительность в секундах при FPS
+// ролика (тот же пересчёт, что в рендере) и направление у slide/wipe. cut и отсутствие поля – пусто.
+function transitionSummary(scene, index, fps) {
+  const transition = scene?.transition;
+  if (index === 0 || !transition || transition.type === 'cut') return '';
+  const frames = Number.isInteger(transition.frames) ? transition.frames : TRANSITION_FRAMES_25.default;
+  const seconds = Number.isFinite(fps) && fps > 0 ? ref25(frames, fps) / fps : frames / 25;
+  const parts = [transition.type, `${String(Math.round(seconds * 100) / 100).replace('.', ',')} с`];
+  if (DIRECTED_TRANSITIONS.has(transition.type)) parts.push(DIRECTION_WORDS[transition.direction ?? 'left']);
+  if (transition.type === 'push') parts.push('середина на границе');
+  return `Вход: ${parts.join(', ')}`;
+}
+
 function formatMotionBriefMarkdown(brief) {
-  const sceneRows = (brief.scenes || []).map((scene, index) => (
-    `| ${String(index + 1).padStart(2, '0')} | ${scene.scene} | ${clock(scene.start)}–${clock(scene.end)} | ${cell(sceneSummary(scene))} |`
-  ));
+  const sceneRows = (brief.scenes || []).map((scene, index) => {
+    const summary = [transitionSummary(scene, index, brief.output?.fps), sceneSummary(scene)].filter(Boolean).join('. ');
+    return `| ${String(index + 1).padStart(2, '0')} | ${scene.scene} | ${clock(scene.start)}–${clock(scene.end)} | ${cell(summary)} |`;
+  });
   return [
     `# Motion Reel: ${brief.title || 'VIDEO'}`,
     '',
@@ -217,6 +320,8 @@ function formatMotionBriefMarkdown(brief) {
 
 module.exports = {
   MOTION_SCENES,
+  MOTION_TRANSITION_TYPES,
+  TRANSITION_FRAMES_25,
   buildDraftMotionProps,
   buildMotionProps,
   formatMotionBriefMarkdown,

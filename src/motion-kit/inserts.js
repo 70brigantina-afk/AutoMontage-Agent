@@ -72,12 +72,20 @@ export function compileInserts(inserts = [], { fps, durationInFrames } = {}) {
     const id = insert.id || `${insert.kind}-${i + 1}`;
     const kb = insert.kb ?? KB_DEFAULT;
     assertKb(kb, `inserts[${i}] (${id})`);
+    if (insert.origin !== undefined && insert.origin !== null && (typeof insert.origin !== 'string' || !insert.origin.trim())) {
+      throw new Error(`inserts[${i}] (${id}): origin должен быть id элемента из items – получено ${JSON.stringify(insert.origin)}`);
+    }
     return {
       id, kind: insert.kind, from, to,
       src: insert.src ?? null,
       cover,
       kb,
       sfx: insert.sfx ?? null,
+      // origin – id элемента, из рамки которого растёт карточка. Боксы ставит compileLayer
+      // (resolveOrigins): здесь элементы ещё не известны. null – карточка из safe-зоны, как раньше.
+      origin: insert.origin ?? null,
+      originBox: null,
+      closeBox: null,
     };
   });
 }
@@ -126,6 +134,42 @@ export function revealProgress(frame, insert, fps = 25) {
   const reveal = ref25(REVEAL_FRAMES, fps);
   const { start, end } = closeWindow(insert, fps);
   return prog(frame, insert.from, reveal) * (1 - prog(frame, start, end - start, EASE.inOut));
+}
+
+// Линейное смешение двух рамок {x, y, w, h}: 0 – fromBox, 1 – toBox. Прогресс вне [0, 1] клэмпится.
+export function morphRect(fromBox, toBox, progress) {
+  const t = Math.min(1, Math.max(0, progress));
+  const mix = (a, b) => a + (b - a) * t;
+  return { x: mix(fromBox.x, toBox.x), y: mix(fromBox.y, toBox.y), w: mix(fromBox.w, toBox.w), h: mix(fromBox.h, toBox.h) };
+}
+
+// Габарит itemExtentAt ({left, top, right, bottom} или null) в рамку {x, y, w, h}.
+export function extentToBox(extent) {
+  return extent ? { x: extent.left, y: extent.top, w: extent.right - extent.left, h: extent.bottom - extent.top } : null;
+}
+
+// Карточка safe-зоны – та же, что revealCard, но рамкой {x, y, w, h}.
+export function cardBox(width, height) {
+  const safe = safeRect(width, height);
+  return { x: safe.left, y: safe.top, w: safe.right - safe.left, h: safe.bottom - safe.top };
+}
+
+// Рамка вставки в кадре: от исходной рамки (бокс элемента origin или карточка safe-зоны) до полного
+// кадра за REVEAL_FRAMES, на закрытии – обратно в бокс элемента, если он ещё виден к началу close
+// (closeBox), иначе в карточку. Рамку закрытия берём только после того, как раскрытие дошло до
+// конца: на очень короткой вставке смена опоры посреди раскрытия дала бы скачок. radius – скругление
+// углов в px: полное на карточке, 0 на весь кадр. null – вставки нет.
+export function insertRect(frame, insert, { fps = 25, width, height }) {
+  const p = revealProgress(frame, insert, fps);
+  if (p === null) return null;
+  const { start } = closeWindow(insert, fps);
+  const closing = frame >= start && frame >= insert.from + ref25(REVEAL_FRAMES, fps);
+  const card = cardBox(width, height);
+  const anchor = (closing ? insert.closeBox : insert.originBox) || card;
+  const rect = morphRect(anchor, { x: 0, y: 0, w: width, h: height }, p);
+  // Тот же коэффициент, что и safeRect: ширина к канону 1080 (портрет) / 1920 (ландшафт).
+  const radius = 28 * (width / (height > width ? 1080 : 1920)) * (1 - p);
+  return { ...rect, radius };
 }
 
 // Угасание вставки к моменту закрытия: 1 до начала close, 0 на последнем кадре (to − 1) – то же

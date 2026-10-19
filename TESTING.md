@@ -1073,6 +1073,8 @@ Pexels подменён. `tests/qa-preview.test.js` в той же маске �
   `compilePlan` и форма манифеста; React-компоненты – через рендер в разметку; alias
   `@automontage/motion-kit` для Node и Remotion; `motion-kit-node.test.js` – сборка слоя esbuild,
   понятные ошибки сломанного слоя и граница `plan.js` (в том числе пути Windows);
+  `motion-transitions-docs.test.js` – раздел «Переходы» справочника, `origin`, `pushes` и G16 в
+  `docs/MOTION-KIT.md`, поле `transition` в reference, синхрон копий навыков;
   `motion-kit-docs.test.js` – что `docs/MOTION-KIT.md` называет G1–G12, все команды `layer` и
   `@automontage/motion-kit/core` и не содержит личных путей и папок роликов, README показывает
   `automontage layer new --project-dir`, а `.env.example` и `ASSETS.md` называют

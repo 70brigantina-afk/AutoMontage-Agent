@@ -969,7 +969,11 @@ flowchart TD
   `words`, `safe`, `camera`, `motion`, `inserts`, `sfx`, `captions`, `compile`, `manifest`,
   `screen`), `index.js` добавляет React-компоненты: `SpeakerLayer`, `KitBox`, `FullscreenReveal` и
   `StockInsert` (модуль `Inserts.jsx`), `BrowserFrame`, `ScrollShot` и `ShutterFlash` (модуль
-  `Screen.jsx`), `SfxTrack`, `Subtitles`, `FontLoader`. Слой подключает kit по имени
+  `Screen.jsx`), `SfxTrack`, `Subtitles`, `FontLoader`. Вставка с `origin` растёт из рамки
+  элемента (`compile.js` привязывает `origin` и `camera.pushes[].target` к элементам `items`,
+  морф 9 кадров), наезд камеры `pushes` идёт 12 кадров в центр рамки элемента; боксы попадают в
+  манифест, а гейт G16 (`timeline-gates.js`) останавливает слой, если элемент не виден в кадре
+  начала. Слой подключает kit по имени
   `@automontage/motion-kit`: Remotion – через webpack alias `withMotionKitAlias`
   (`scripts/remotion-webpack.js`; каталог kit `remotion.config.js` считает от текущей папки,
   поэтому рендер идёт из корня движка), Node – через alias esbuild в `scripts/motion-kit-node.js`.
@@ -996,7 +1000,7 @@ flowchart TD
   sha256); `layer words`, `layer check` и `layer render` на другом исходнике отказываются.
 - **`layer check`** (`scripts/layer/check.js`) удаляет прошлый манифест, пишет новый
   `out/manifest.json` и прогоняет `runTimelineGates` (`scripts/qa/timeline-gates.js`: G1–G5,
-  G9–G11, исключения через `applyWaivers`), дополнительно меряя ffprobe клипы stock-вставок для
+  G9–G11, G16, исключения через `applyWaivers`), дополнительно меряя ffprobe клипы stock-вставок для
   G10. Любой отказ сборки или формы манифеста – отчёт с `error`, код 2.
 - **Машинная очередь** (`scripts/heavy-queue.js`, D-044) общая для `layer render`,
   `layer import`, `preview`, final render (lesson и Dynamic), `master` и `roughcut`. Атомарные
@@ -1195,6 +1199,17 @@ flowchart TD
 и полную длительность narration из props, включая хвост после последней сцены. Единственный
 `Audio` narration находится на корне с кадра 0. Каждая `Sequence` использует глобальные
 округлённые start/end, а входы текста, карточек, шагов и счётчика считают локальные кадры.
+Если у сцены (кроме первой) есть не-`cut` `transition`, `MotionDirector` собирает сцены через
+`TransitionSeries` (`src/motion/transitions.js`): содержимое сцены видно ровно в своём start, а
+предыдущая тянется до него (через паузу, если она есть) и дальше на хвост перехода, поэтому
+таймлайн, звук и общая длительность прежние. Всё после номинального конца сцены – стоп-кадр её
+последнего кадра (`Freeze`: видео не продолжается, звук клипа молчит). `fade`, `slide` и `wipe`
+начинаются в start (новая сцена в этом кадре только начинает проявляться). `push` – `pushCut` из
+`@remotion/transitions`: жёсткая склейка с коротким наездом на обеих сценах (1 → 1,04 и 1,04 →
+1,07) и вспышкой `#f5f2ed` с непрозрачностью до 0,2 (кадр до склейки и 2 после). Склейка приходится
+ровно на кадр start: lead = floor(frames/2) кадров до start, прогресс линейный, `cutProgress` –
+между кадрами lead − 1 и lead. Видео сцены стартует на lead кадров позже и до start держит первый
+кадр, поэтому кадр клипа в start прежний.
 Шаги раскрываются node → connector → node; счётчик интерполирует к точному утверждённому
 значению, включая знак и дробь, и сохраняет число на одной строке.
 
@@ -1273,7 +1288,7 @@ Remotion `OffthreadVideo`. `trimBefore = round(trimStartSec × fps)`, а дли�
 | Motion-kit (детали слоя) | `src/motion-kit/*` (чистые `core.js` и React `index.js`), `templates/motion-layer/` (стартовые файлы слоя), `scripts/remotion-webpack.js` (alias `@automontage/motion-kit`) |
 | Kit в Node | `scripts/motion-kit-node.js`: `loadKitCore`, `buildLayerManifest`, граница `plan.js` `findPlanViolation` (esbuild `buildSync` + metafile) |
 | Команды слоя | `scripts/layer/cli.js` и `new`, `words`, `check`, `render`, `import`, `brief`, `stock`, `sheet`; общие части `common.js`, `registry.js`, `sfx-library.js`; машинная очередь `scripts/heavy-queue.js`; `remotionLayerRenderCommand` в `scripts/build-commands.js` |
-| QA-гейты | `scripts/qa/profiles.js`, `report.js`, `safe-rect.js`, `timeline-gates.js` (G1–G5, G9–G11), `audio.js`, `media-gates.js` (G6, G7), `mix-gates.js` (G8), `preview-gates.js` (барьер L + G8), `empty-frame-gate.js` (G12), `key-moments.js` и `moment-stills.js` (моменты и кадры критика из композиции), `critic.js` (отчёт критика), `final-transcript-gates.js` (F1–F5), `cover-frame-gate.js` (G13), `text-layout-gates.js` (G14, G15), `text-boxes.js` (рамки надписей с кадров финала), `final-qa.js` (раннер финала) |
+| QA-гейты | `scripts/qa/profiles.js`, `report.js`, `safe-rect.js`, `timeline-gates.js` (G1–G5, G9–G11, G16), `audio.js`, `media-gates.js` (G6, G7), `mix-gates.js` (G8), `preview-gates.js` (барьер L + G8), `empty-frame-gate.js` (G12), `key-moments.js` и `moment-stills.js` (моменты и кадры критика из композиции), `critic.js` (отчёт критика), `final-transcript-gates.js` (F1–F5), `cover-frame-gate.js` (G13), `text-layout-gates.js` (G14, G15), `text-boxes.js` (рамки надписей с кадров финала), `final-qa.js` (раннер финала) |
 
 Длинный рендер хранит части в `out/.chunks/<job-sha256>/`. Cache descriptor v2 включает
 composition, канонизированные props, identities source/audio, диапазоны и Remotion options,

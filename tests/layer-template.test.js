@@ -144,12 +144,12 @@ test('the copied template builds a manifest through buildLayerManifest with came
 test('the neutral template on a neutral fixture fails no timeline gate', (t) => {
   const { layerDir } = makeLayer(t);
   const gates = runTimelineGates(buildLayerManifest(layerDir), getProfile('avatar'));
-  assert.deepEqual(gates.map((g) => g.id), ['G1', 'G2', 'G3', 'G4', 'G5', 'G9', 'G10', 'G11']);
+  assert.deepEqual(gates.map((g) => g.id), ['G1', 'G2', 'G3', 'G4', 'G5', 'G9', 'G10', 'G11', 'G16']);
   const failed = gates.filter((g) => g.status === 'fail');
   assert.deepEqual(failed.map((g) => `${g.id}: ${g.hint}`), []);
   // Стоп-гейты ритма, масштаба, хука и safe-zone проходят чисто; G10 честно просит второй сток.
   const byId = statuses(gates);
-  for (const id of ['G1', 'G3', 'G4', 'G5', 'G9', 'G11']) assert.equal(byId[id], 'pass', id);
+  for (const id of ['G1', 'G3', 'G4', 'G5', 'G9', 'G11', 'G16']) assert.equal(byId[id], 'pass', id);
   assert.equal(byId.G10, 'warn');
 });
 

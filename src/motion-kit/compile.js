@@ -1,6 +1,7 @@
 import { compileCamera, withAways } from './camera.js';
 import { buildChunks, captionLane } from './captions.js';
-import { awaysFromInserts, compileInserts } from './inserts.js';
+import { awaysFromInserts, closeWindow, compileInserts, extentToBox } from './inserts.js';
+import { itemExtentAt } from './motion.js';
 import { sfxFromItems, thinCues } from './sfx.js';
 import { secToFrame } from './time.js';
 
@@ -65,10 +66,43 @@ export function compileItems(items = [], { fps, durationInFrames }) {
 // Один вход для рендера (Root.jsx) и для гейтов (buildManifest): камера, items и inserts – в
 // кадрах композиции; субтитры (captions.chunks) остаются в секундах, как их отдал buildChunks –
 // в кадры их переводит buildManifest.
+// Привязка вставок (origin) и наездов (camera.pushes[].target) к элементам кадра. Габарит берём тем
+// же itemExtentAt, что манифест и гейт safe-zone: рамка, из которой растёт карточка, и центр
+// наезда – ровно то, что видит зритель в этом кадре. Неизвестный id – ошибка компиляции; элемент,
+// не видимый в кадре начала, даёт box = null: рендер берёт прежнее поведение (карточка safe-зоны,
+// наезд пропускается), а гейт G16 (scripts/qa/timeline-gates.js) показывает ❌ с id.
+function resolveOrigins(inserts, items, fps) {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  return inserts.map((insert, i) => {
+    if (!insert.origin) return insert;
+    const item = byId.get(insert.origin);
+    if (!item) throw new Error(`inserts[${i}] (${insert.id}): origin «${insert.origin}» – нет элемента с таким id в items`);
+    const { start } = closeWindow(insert, fps);
+    return {
+      ...insert,
+      originBox: extentToBox(itemExtentAt(item, insert.from, fps)),
+      closeBox: extentToBox(itemExtentAt(item, start, fps)),
+    };
+  });
+}
+
+function resolvePushTargets(camera, items, fps) {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  const pushes = camera.pushes.map((push) => {
+    const item = byId.get(push.target);
+    if (!item) throw new Error(`camera.pushes[${push.index}]: target «${push.target}» – нет элемента с таким id в items`);
+    return { ...push, box: extentToBox(itemExtentAt(item, push.from, fps)) };
+  });
+  return { ...camera, pushes };
+}
+
 export function compileLayer(plan, { fps, width, height, durationInFrames, words = [], sfxLibrary = { sounds: {} } }) {
-  const inserts = compileInserts(plan.inserts, { fps, durationInFrames });
-  const camera = withAways(compileCamera(plan.camera, { fps, width, height, durationInFrames }), awaysFromInserts(inserts, { fps }));
+  // Порядок проверок прежний (вставки, камера, элементы); привязки к элементам – после всех трёх.
+  const compiledInserts = compileInserts(plan.inserts, { fps, durationInFrames });
+  const track = withAways(compileCamera(plan.camera, { fps, width, height, durationInFrames }), awaysFromInserts(compiledInserts, { fps }));
   const items = compileItems(plan.items, { fps, durationInFrames });
+  const inserts = resolveOrigins(compiledInserts, items, fps);
+  const camera = resolvePushTargets(track, items, fps);
   const cues = thinCues(sfxFromItems([...items, ...inserts], plan.sfx, { fps, library: sfxLibrary, durationInFrames }), { fps });
   const captions = plan.captions === false ? null : {
     chunks: buildChunks(words, plan.captions?.chunk),
