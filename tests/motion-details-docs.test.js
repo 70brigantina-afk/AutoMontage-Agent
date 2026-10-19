@@ -59,11 +59,12 @@ test('SCENE-CATALOG, критик, журнал и архитектура опи
   assert.match(catalog, /texture/u);
   assert.match(read('skills/reel-turnkey/references/motion-critic.md'), /одометр/u);
   const log = read('CHANGELOG.md');
-  const start = log.indexOf('## [Unreleased]');
-  const unreleased = log.slice(start, log.indexOf('\n## [', start + 5));
-  assert.match(unreleased, /[Оо]дометр/u);
-  assert.match(unreleased, /chart/u);
-  assert.match(unreleased, /texture/u);
+  const start = log.indexOf('## [1.22.0]');
+  assert.ok(start >= 0, 'CHANGELOG: нет секции 1.22.0');
+  const release = log.slice(start, log.indexOf('\n## [', start + 5));
+  assert.match(release, /[Оо]дометр/u);
+  assert.match(release, /chart/u);
+  assert.match(release, /texture/u);
   assert.match(read('ARCHITECTURE.md'), /src\/details\//u);
   assert.match(read('README.md'), /style\.texture/u);
 });
