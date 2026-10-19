@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef } from 'react';
 import { cancelRender, continueRender, delayRender, useCurrentFrame, useVideoConfig } from 'remotion';
 import { safeFor } from '../scenes/safezone';
 import { Sheen, useTexture } from '../details/Texture.jsx';
+import { sheenProgress } from '../details/texture.js';
 import { motionTheme as t, motionPresets, revealProgress } from './motion-theme';
 
 export const MOTION_WIDTH = 1080;
@@ -77,13 +78,21 @@ export const SceneFrame = ({ children, caption }) => {
   </div>;
 };
 
+// Блик (subtle) есть в DOM только на свои 12 кадров при 25 fps. Вне прохода карточка та же, что при
+// none: без блика, обёрток и лишнего position. В проходе карточка – свой контекст наложения
+// (isolation), блик с z-index -1 лежит над её фоном и под контентом. children всегда во втором слоте,
+// поэтому смена кадра не перемонтирует их.
 export const Panel = ({ children, style = {}, sheenFrame = 0 }) => {
   const subtle = useTexture() === 'subtle';
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const enterFrame = Math.round(sheenFrame);
+  const sheen = subtle && sheenProgress(frame, fps, enterFrame) !== null;
   const background = style.background || t.panel;
   // Блик контрастирует с фоном карточки: на светлой панели акцентно-светлый, на акцентной белый.
   const sheenColor = background === t.panel ? t.accentSoft : t.panel;
   return <div style={{
     background: t.panel, borderRadius: t.radius, padding: 38, boxSizing: 'border-box',
-    border: `1px solid ${t.line}`, ...(subtle ? { position: 'relative' } : {}), ...style,
-  }}>{subtle && <Sheen enterFrame={Math.round(sheenFrame)} color={sheenColor} />}{subtle ? <div data-panel-content="true" style={{ position: 'relative', zIndex: 1 }}>{children}</div> : children}</div>;
+    border: `1px solid ${t.line}`, ...(sheen ? { position: 'relative', isolation: 'isolate' } : {}), ...style,
+  }}>{sheen ? <Sheen enterFrame={enterFrame} color={sheenColor} zIndex={-1} /> : null}{children}</div>;
 };
