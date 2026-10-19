@@ -244,7 +244,8 @@
         "label": { "$ref": "#/definitions/shortText" },
         "value": { "type": "number" },
         "prefix": { "type": "string", "maxLength": 16 },
-        "suffix": { "type": "string", "maxLength": 16 }
+        "suffix": { "type": "string", "maxLength": 16 },
+        "layout": { "description": "Где стоят prefix и suffix: inline – в одной строке с числом (по умолчанию), stack – стопкой над числом и под ним.", "enum": ["inline", "stack"] }
       }
     },
     "mediaScene": {
