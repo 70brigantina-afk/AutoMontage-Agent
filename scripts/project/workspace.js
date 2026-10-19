@@ -111,15 +111,23 @@ function lstatIfPresent(fileSystem, target) {
   }
 }
 
-function assertNoProjectSymlink(root, segments, fileSystem, label) {
+function assertNoProjectSymlink(root, segments, fileSystem, label, { tolerateLeafPending = null } = {}) {
   const rootStat = fileSystem.lstatSync(root);
   if (rootStat.isSymbolicLink()) {
     throw new Error(`${label} escapes through a symbolic link`);
   }
   let current = root;
-  for (const segment of segments) {
+  for (const [index, segment] of segments.entries()) {
     current = path.join(current, segment);
-    const stat = lstatIfPresent(fileSystem, current);
+    let stat;
+    try {
+      stat = lstatIfPresent(fileSystem, current);
+    } catch (error) {
+      // Удаляемый на Windows последний сегмент: предки уже проверены, сам файл вот-вот исчезнет.
+      if (index === segments.length - 1 && tolerateLeafPending
+        && isWindowsPendingDelete(error, tolerateLeafPending)) break;
+      throw error;
+    }
     if (!stat) break;
     if (stat.isSymbolicLink()) {
       throw new Error(`${label} escapes through a symbolic link`);
@@ -130,6 +138,14 @@ function assertNoProjectSymlink(root, segments, fileSystem, label) {
 // Запись исчезла между проверкой и использованием: другой процесс как раз убрал файл.
 function isVanishedEntry(error) {
   return Boolean(error && (error.code === 'ENOENT' || error.code === 'ENOTDIR'));
+}
+
+// Windows: файл, который другой процесс удаляет или переименовывает (delete pending), до закрытия
+// последнего дескриптора отвечает на lstat, realpath, open и link ошибкой EPERM или EBUSY, а не
+// ENOENT. Только на win32 это значит «запись уходит»; на других системах EPERM – настоящий отказ.
+function isWindowsPendingDelete(error, platform) {
+  return Boolean(platform === 'win32' && error
+    && (error.code === 'EPERM' || error.code === 'EBUSY'));
 }
 
 // Проверка пути читает файловую систему несколькими вызовами подряд. Если чужой процесс удалил
@@ -149,6 +165,13 @@ function resolveProjectPath(projectDir, storedPath, options = {}) {
 function resolveProjectPathOnce(projectDir, storedPath, options) {
   const label = options.label || 'project path';
   const fileSystem = options.fileSystem || fs;
+  const platform = options.platform || process.platform;
+  // Только по явному запросу (захват lease): удаляемый на Windows файл равен отсутствующему.
+  // На Windows EPERM значит и обычный ACCESS_DENIED, поэтому остальные вызовы остаются строгими:
+  // иначе symlink в последнем сегменте с отказом lstat/realpath прошёл бы без проверки цели.
+  const pendingPlatform = options.tolerateWindowsPendingDelete === true && !options.mustExist
+    ? platform
+    : null;
   if (typeof storedPath !== 'string' || storedPath.length === 0 || storedPath.includes('\0')) {
     throw new Error(`${label} must be a non-empty relative path`);
   }
@@ -168,7 +191,7 @@ function resolveProjectPathOnce(projectDir, storedPath, options) {
     throw new Error(`${label} escapes the project workspace`);
   }
 
-  assertNoProjectSymlink(root, segments, fileSystem, label);
+  assertNoProjectSymlink(root, segments, fileSystem, label, { tolerateLeafPending: pendingPlatform });
   const rootReal = fileSystem.realpathSync(root);
   let ancestor = candidate;
   while (!fileSystem.existsSync(ancestor)) {
@@ -176,20 +199,38 @@ function resolveProjectPathOnce(projectDir, storedPath, options) {
     if (parent === ancestor) break;
     ancestor = parent;
   }
-  const ancestorReal = fileSystem.realpathSync(ancestor);
+  let ancestorReal;
+  let candidatePending = false;
+  try {
+    ancestorReal = fileSystem.realpathSync(ancestor);
+  } catch (error) {
+    if (ancestor !== candidate || !pendingPlatform
+      || !isWindowsPendingDelete(error, pendingPlatform)) throw error;
+    // Сам файл удаляется: сверяем с корнем его папку, как для ещё не созданного файла.
+    candidatePending = true;
+    ancestorReal = fileSystem.realpathSync(path.dirname(candidate));
+  }
   if (!isInside(rootReal, ancestorReal)) {
     throw new Error(`${label} escapes through a symbolic link`);
   }
+  if (candidatePending) return candidate;
 
   if (options.mustExist && !fileSystem.existsSync(candidate)) {
     throw new Error(`${label} does not exist`);
   }
   if (fileSystem.existsSync(candidate)) {
-    const candidateReal = fileSystem.realpathSync(candidate);
-    if (!isInside(rootReal, candidateReal)) {
-      throw new Error(`${label} escapes through a symbolic link`);
+    let candidateReal;
+    let stat;
+    try {
+      candidateReal = fileSystem.realpathSync(candidate);
+      if (!isInside(rootReal, candidateReal)) {
+        throw new Error(`${label} escapes through a symbolic link`);
+      }
+      stat = fileSystem.statSync(candidateReal);
+    } catch (error) {
+      if (pendingPlatform && isWindowsPendingDelete(error, pendingPlatform)) return candidate;
+      throw error;
     }
-    const stat = fileSystem.statSync(candidateReal);
     if (options.type === 'file' && !stat.isFile()) throw new Error(`${label} must be a file`);
     if (options.type === 'directory' && !stat.isDirectory()) {
       throw new Error(`${label} must be a directory`);
@@ -1031,11 +1072,14 @@ function acquireProjectMutationLease(projectDir, {
       fileSystem,
       mustExist: false,
       type: 'file',
+      platform,
+      tolerateWindowsPendingDelete: true,
     });
   } catch (error) {
     // Lease другого процесса исчезает и появляется непрерывно: это занятость, а не сбой.
     // Но если пропала сама папка проекта, это не «повторите позже»: отдаём исходную ошибку.
-    if (isVanishedEntry(error) && lstatIfPresent(fileSystem, resolvedProjectDir)?.isDirectory()) {
+    if ((isVanishedEntry(error) || isWindowsPendingDelete(error, platform))
+      && lstatIfPresent(fileSystem, resolvedProjectDir)?.isDirectory()) {
       throw manifestConflict();
     }
     throw error;
@@ -1058,7 +1102,14 @@ function acquireProjectMutationLease(projectDir, {
       platform,
     });
     try {
-      fileSystem.linkSync(staged.path, leasePath);
+      try {
+        fileSystem.linkSync(staged.path, leasePath);
+      } catch (error) {
+        // Имя lease ещё занято удаляемым файлом прежнего владельца: это занятость, пробуем снова.
+        // Попыток столько же, сколько у цикла; дальше конфликт, и ждёт уже вызывающий по своему сроку.
+        if (isWindowsPendingDelete(error, platform)) continue;
+        throw error;
+      }
       const identity = lstatIfPresent(fileSystem, leasePath);
       if (!identity || identity.isSymbolicLink() || !identity.isFile()) throw manifestConflict();
       const committed = { identity, bytes: ownerBytes };
@@ -1102,7 +1153,13 @@ function acquireProjectMutationLease(projectDir, {
     if (!isProvablyDeadLeaseOwner(existing.owner, { hostname, killProcess })) {
       throw manifestConflict();
     }
-    assertFileSnapshot(fileSystem, leasePath, existing.snapshot);
+    try {
+      assertFileSnapshot(fileSystem, leasePath, existing.snapshot);
+    } catch (error) {
+      // Брошенный lease успели убрать или удаляют прямо сейчас: это та же занятость.
+      if (isVanishedEntry(error) || isWindowsPendingDelete(error, platform)) throw manifestConflict();
+      throw error;
+    }
     const tombstonePath = `${leasePath}.dead-${existing.owner.token}`;
     try {
       fileSystem.linkSync(leasePath, tombstonePath);

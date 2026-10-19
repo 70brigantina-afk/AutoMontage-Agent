@@ -196,6 +196,114 @@ test('a project path that vanishes mid-check resolves as absent and a swapped-in
   assert.equal(fs.readFileSync(outsideFile, 'utf8'), 'outside');
 });
 
+test('a lease-like file pending deletion on Windows (EPERM, EBUSY) resolves as absent only when it may be missing', (t) => {
+  const fixture = makeFixture(t);
+  const workspace = createOrOpenProject({
+    projectDir: path.join(fixture.dir, 'project'),
+    name: 'Delete pending path',
+    sourcePath: fixture.sourcePath,
+    now: new Date('2026-08-05T12:00:00Z'),
+  });
+  const candidate = path.join(workspace.dir, '.pending.lock');
+  fs.writeFileSync(candidate, 'owner');
+  const pendingNames = new Set([candidate, fs.realpathSync(candidate)]);
+  // Windows: чужой процесс уже удаляет файл (delete pending), existsSync ещё видит его,
+  // а realpathSync или lstatSync отвечают EPERM или EBUSY вместо ENOENT.
+  function pendingFileSystem(method, code) {
+    return new Proxy(fs, {
+      get(target, key) {
+        if (key !== method) return Reflect.get(target, key);
+        return (filename, ...args) => {
+          if (pendingNames.has(path.resolve(String(filename)))) {
+            throw Object.assign(new Error(`${code}: operation not permitted, lstat '${candidate}'`), { code });
+          }
+          return target[method](filename, ...args);
+        };
+      },
+    });
+  }
+  const resolve = (fileSystem, extra) => resolveProjectPath(workspace.dir, '.pending.lock', {
+    type: 'file', fileSystem, ...extra,
+  });
+
+  for (const method of ['realpathSync', 'lstatSync', 'statSync']) {
+    for (const code of ['EPERM', 'EBUSY']) {
+      const fileSystem = pendingFileSystem(method, code);
+      assert.equal(
+        resolve(fileSystem, { mustExist: false, platform: 'win32', tolerateWindowsPendingDelete: true }),
+        candidate,
+        `${method} ${code}`,
+      );
+      // Без явного флага строгость прежняя и на Windows: EPERM может быть обычным ACCESS_DENIED.
+      assert.throws(
+        () => resolve(fileSystem, { mustExist: false, platform: 'win32' }),
+        (error) => error.code === code,
+        `${method} ${code} без флага не прячется`,
+      );
+      assert.throws(
+        () => resolve(fileSystem, { mustExist: false, platform: 'linux', tolerateWindowsPendingDelete: true }),
+        (error) => error.code === code,
+        `${method} ${code} на linux не прячется`,
+      );
+      assert.throws(
+        () => resolve(fileSystem, { mustExist: true, platform: 'win32', tolerateWindowsPendingDelete: true }),
+        (error) => error.code === code,
+        `${method} ${code} при mustExist не прячется`,
+      );
+    }
+  }
+  // Посторонний код ошибки на Windows по-прежнему не считается «файла ещё нет».
+  assert.throws(
+    () => resolve(pendingFileSystem('realpathSync', 'EACCES'), {
+      mustExist: false, platform: 'win32', tolerateWindowsPendingDelete: true,
+    }),
+    (error) => error.code === 'EACCES',
+  );
+});
+
+test('a leaf symlink outside the project with denied lstat/realpath (EPERM) on Windows is never returned without the opt-in flag', (t) => {
+  const fixture = makeFixture(t);
+  const workspace = createOrOpenProject({
+    projectDir: path.join(fixture.dir, 'project'),
+    name: 'Denied leaf symlink',
+    sourcePath: fixture.sourcePath,
+    now: new Date('2026-08-05T12:00:00Z'),
+  });
+  const outsideFile = path.join(fixture.dir, 'outside-secret.txt');
+  fs.writeFileSync(outsideFile, 'outside');
+  const leaf = path.join(workspace.dir, 'leaf-link.json');
+  fs.symlinkSync(outsideFile, leaf);
+  const deniedNames = new Set([leaf]);
+  // Windows: ACCESS_DENIED на сам symlink тоже приходит как EPERM.
+  const deniedFileSystem = (methods) => new Proxy(fs, {
+    get(target, key) {
+      if (!methods.includes(key)) return Reflect.get(target, key);
+      return (filename, ...args) => {
+        if (deniedNames.has(path.resolve(String(filename)))) {
+          throw Object.assign(new Error(`EPERM: operation not permitted, ${String(key)} '${leaf}'`), { code: 'EPERM' });
+        }
+        return target[key](filename, ...args);
+      };
+    },
+  });
+  for (const methods of [['lstatSync'], ['realpathSync'], ['lstatSync', 'realpathSync']]) {
+    for (const type of ['file', undefined]) {
+      let returned;
+      assert.throws(
+        () => {
+          returned = resolveProjectPath(workspace.dir, 'leaf-link.json', {
+            fileSystem: deniedFileSystem(methods), platform: 'win32', type,
+          });
+        },
+        (error) => Boolean(error),
+        `${methods.join('+')} ${type}: путь не возвращён`,
+      );
+      assert.equal(returned, undefined);
+    }
+  }
+  assert.equal(fs.readFileSync(outsideFile, 'utf8'), 'outside');
+});
+
 test('manifest write ignores a predictable temp symlink and publishes a regular manifest', (t) => {
   const fixture = makeFixture(t);
   const workspace = createOrOpenProject({
