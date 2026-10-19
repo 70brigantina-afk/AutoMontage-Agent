@@ -1,8 +1,8 @@
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useLayoutEffect, useRef } from 'react';
 import { staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import { motionTheme } from '../motion/motion-theme';
 import { GRAIN_DATA_URI } from './grain-data.js';
-import { DRIFT_COLOR_KEYS, DRIFT_OPACITY, GRAIN_OPACITY, GRAIN_TILE, driftAt, grainOffset, sheenProgress } from './texture.js';
+import { DRIFT_COLOR_KEYS, DRIFT_OPACITY, GRAIN_OPACITY, GRAIN_TILE, driftAt, grainOffset, paintDrift, sheenProgress } from './texture.js';
 
 // 'none' | 'subtle': Panel узнаёт режим отсюда и рисует блик только при subtle.
 export const TextureContext = createContext('none');
@@ -30,15 +30,32 @@ export const Grain = ({ opacity = GRAIN_OPACITY, src = null, frame: absoluteFram
 };
 
 // Медленный дрейф цветных пятен фона. Слой шире кадра на амплитуду, края не открываются.
+// Пятна рисуются в canvas один раз при монтировании (paintDrift), по кадрам меняется только
+// translate3d. CSS radial-gradient на весь кадр Chrome растеризует заново на каждом снимке кадра,
+// это было +380 % ко времени рендера; картинка canvas та же (сдвиг и пятна прежние).
 export const Drift = ({ colors = DRIFT_COLOR_KEYS.map((key) => motionTheme[key]), amplitude = 0.06, frame: absoluteFrame = null }) => {
   const frame = useTextureFrame(absoluteFrame);
   const { fps, width, height } = useVideoConfig();
   const { x, y } = driftAt(frame, fps, { amplitude });
   const [first, second] = colors;
+  const canvasRef = useRef(null);
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext?.('2d');
+    if (!ctx) return;
+    // Размер слоя без трансформаций предков; плотность – как у кадра (scale рендера).
+    const layerWidth = canvas.offsetWidth;
+    const layerHeight = canvas.offsetHeight;
+    const scale = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round(layerWidth * scale));
+    canvas.height = Math.max(1, Math.round(layerHeight * scale));
+    paintDrift(ctx, { width: layerWidth, height: layerHeight, scale, colors: [first, second] });
+  }, [first, second, amplitude, width, height]);
+  const size = `${(1 + 2 * amplitude) * 100}%`;
   return <div aria-hidden="true" data-texture-drift="true" style={{ ...fill, overflow: 'hidden' }}>
-    <div style={{ position: 'absolute', inset: `${-amplitude * 100}%`,
-      transform: `translate(${x * width}px, ${y * height}px)`,
-      background: `radial-gradient(circle at 25% 20%, ${first} 0%, transparent 55%), radial-gradient(circle at 80% 85%, ${second} 0%, transparent 50%)`,
+    <canvas ref={canvasRef} style={{ position: 'absolute', left: `${-amplitude * 100}%`, top: `${-amplitude * 100}%`,
+      width: size, height: size, willChange: 'transform',
+      transform: `translate3d(${x * width}px, ${y * height}px, 0)`,
       opacity: DRIFT_OPACITY,
     }} />
   </div>;

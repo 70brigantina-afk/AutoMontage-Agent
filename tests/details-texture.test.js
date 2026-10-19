@@ -327,3 +327,71 @@ test('isDarkBackground: полупрозрачный rgba не считаетс�
   assert.equal(isDarkBackground('rgba(0, 0, 0, 1)'), true);
   assert.equal(isDarkBackground('rgba(255,255,255,1)'), false);
 });
+
+// Скорость: CSS radial-gradient на весь кадр Chrome растеризует заново на каждом снимке кадра
+// (captureBeyondViewport), это давало +380 % ко времени рендера. Дрейф рисуется один раз в canvas,
+// по кадрам меняется только translate3d.
+test('Drift – canvas-слой: по кадрам меняется только transform (translate3d), остальное неизменно', () => {
+  const tagAt = (frame) => {
+    const { Drift } = loadMotion('src/details/Texture.jsx', { useCurrentFrame: () => frame });
+    const html = renderToStaticMarkup(React.createElement(Drift));
+    const tag = /<canvas[^>]*>/.exec(html)?.[0];
+    assert.ok(tag, 'слой дрейфа – canvas');
+    assert.doesNotMatch(html, /radial-gradient/, 'CSS-градиент не растеризуется на каждом кадре');
+    return tag;
+  };
+  const a = tagAt(10);
+  const b = tagAt(47);
+  assert.match(a, /transform:translate3d\(/);
+  assert.match(a, /will-change:transform/);
+  assert.match(a, /opacity:0\.3/);
+  assert.notEqual(a, b, 'дрейф движется');
+  const still = (tag) => tag.replace(/transform:translate3d\([^)]*\)/, 'transform:X');
+  assert.equal(still(a), still(b), 'кроме transform слой одинаков на разных кадрах');
+});
+
+test('paintDrift рисует те же два radial-gradient, что CSS-фон: порядок, центры, farthest-corner, стопы', () => {
+  const { paintDrift } = math();
+  const calls = [];
+  const normalized = { '#DEE7F3': '#dee7f3', '#FFFFFF': '#ffffff' };
+  const ctx = {
+    fill: '#000000',
+    set fillStyle(value) {
+      calls.push(['fillStyle', typeof value === 'string' ? value : value.id]);
+      if (typeof value === 'string') this.fill = normalized[value] ?? value;
+    },
+    get fillStyle() { return this.fill; },
+    setTransform: (...args) => calls.push(['setTransform', ...args]),
+    clearRect: (...args) => calls.push(['clearRect', ...args]),
+    fillRect: (...args) => calls.push(['fillRect', ...args]),
+    createRadialGradient: (...args) => {
+      const id = `g${calls.filter((c) => c[0] === 'gradient').length}`;
+      calls.push(['gradient', ...args.map((v) => Math.round(v * 1000) / 1000)]);
+      return { id, addColorStop: (offset, color) => calls.push(['stop', id, offset, color]) };
+    },
+  };
+  // Слой 100×200 CSS-пикселей, canvas вдвое плотнее (devicePixelRatio 2).
+  paintDrift(ctx, { width: 100, height: 200, scale: 2, colors: ['#DEE7F3', '#FFFFFF'] });
+  // farthest-corner: пятно (25 %, 20 %) – угол (100, 200), пятно (80 %, 85 %) – угол (0, 0).
+  const round = (v) => Math.round(v * 1000) / 1000;
+  const [r1, r2] = [round(Math.hypot(75, 160)), round(Math.hypot(80, 170))];
+  const drawn = calls.filter((c) => ['setTransform', 'clearRect', 'gradient', 'stop', 'fillRect'].includes(c[0]));
+  assert.deepEqual(drawn, [
+    ['setTransform', 2, 0, 0, 2, 0, 0],
+    ['clearRect', 0, 0, 100, 200],
+    // В CSS первый фон лежит сверху, поэтому второе пятно рисуется первым.
+    ['gradient', 80, 170, 0, 80, 170, r2],
+    ['stop', 'g0', 0, 'rgba(255, 255, 255, 1)'],
+    ['stop', 'g0', 0.5, 'rgba(255, 255, 255, 0)'],
+    ['fillRect', 0, 0, 100, 200],
+    ['gradient', 25, 40, 0, 25, 40, r1],
+    ['stop', 'g1', 0, 'rgba(222, 231, 243, 1)'],
+    ['stop', 'g1', 0.55, 'rgba(222, 231, 243, 0)'],
+    ['fillRect', 0, 0, 100, 200],
+  ]);
+  // Полупрозрачный цвет: прозрачный конец того же цвета (как CSS transparent в premultiplied).
+  calls.length = 0;
+  paintDrift(ctx, { width: 100, height: 200, scale: 1, colors: ['rgba(1, 2, 3, 0.5)', '#FFFFFF'] });
+  assert.deepEqual(calls.filter((c) => c[0] === 'stop' && c[1] === 'g1').map((c) => c.slice(2)),
+    [[0, 'rgba(1, 2, 3, 0.5)'], [0.55, 'rgba(1, 2, 3, 0)']]);
+});

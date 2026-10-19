@@ -470,32 +470,69 @@ test('реальный кадр: хвост видео-сцены через п�
   assert.ok(Number.isFinite(share) && share > SHARE_THRESHOLD, `G12 edgeShare ${share}`);
 });
 
-test('режим переходов: у каждой сцены непрозрачный фон сцены, текстура в нём идёт от глобального кадра', () => {
+test('backdropVisible: фон сцены только в кадрах входящего и исходящего перехода', () => {
+  const { backdropVisible } = loadMotion('src/motion/transitions.js');
+  const range = { enterFrames: 12, exitFrames: 6, durationInFrames: 100 };
+  const visible = Array.from({ length: 100 }, (_, local) => local).filter((local) => backdropVisible(local, range));
+  assert.deepEqual(visible, [...Array.from({ length: 12 }, (_, i) => i), ...Array.from({ length: 6 }, (_, i) => 94 + i)]);
+  assert.equal(backdropVisible(0, { enterFrames: 0, exitFrames: 0, durationInFrames: 90 }), false, 'сцена без переходов');
+  assert.equal(backdropVisible(89, { enterFrames: 0, exitFrames: 12, durationInFrames: 90 }), true);
+  assert.equal(backdropVisible(77, { enterFrames: 0, exitFrames: 12, durationInFrames: 90 }), false);
+  assert.equal(backdropVisible(78, { enterFrames: 0, exitFrames: 12, durationInFrames: 90 }), true);
+});
+
+// Скорость: фон сцены с текстурой – полная копия слоя корня. Вне перехода сцена не трансформирована и
+// корень под ней рисует тот же кадр, поэтому фон сцены есть только в кадрах перекрытия. В них он у
+// обеих сцен: входящая закрывает уходящую целиком, уходящая при slide/push не открывает просвет.
+test('режим переходов: фон сцены только в кадрах перехода, у обеих сцен, текстура от глобального кадра', () => {
   const { motionTheme } = loadMotion('src/motion/motion-theme.js');
+  const { planSceneTransitions } = loadMotion('src/motion/transitions.js');
+  const state = { frame: 0 };
+  const { MotionDirector } = loadMotion('src/MotionDirector.jsx', { useCurrentFrame: () => state.frame });
   for (const texture of ['subtle', 'none']) {
-    const { MotionDirector } = loadMotion('src/MotionDirector.jsx', { useCurrentFrame: () => 117 });
     const value = brief({ style: { texture }, scenes: [card(0, 3), card(3, 6, { transition: { type: 'push' } }),
       card(6, 9, { transition: { type: 'wipe' } })] });
-    const all = children(MotionDirector(buildMotionProps({ brief: value })));
-    const sequences = all.filter((el) => typeof el.props?.name === 'string' && el.props.name.startsWith('motion-scene-'));
-    assert.equal(sequences.length, 3);
-    sequences.forEach((seq) => {
-      const [first, ...rest] = React.Children.toArray(seq.props.children);
-      // Фон – первый слой сцены, под стоп-кадром содержимого, и не замораживается вместе с ним.
-      assert.ok(isBackdrop(first), `${texture}: первый слой сцены – фон`);
-      assert.equal(first.props.style.background, motionTheme.background);
-      assert.ok(rest.some((el) => typeof el.props?.active === 'function'), 'содержимое после фона');
-      const inner = children(first);
-      const drift = inner.filter((el) => el.type?.name === 'Drift');
-      const grain = inner.filter((el) => el.type?.name === 'Grain');
-      if (texture === 'subtle') {
-        // Тема motion-neutral светлая: зерна нет, только дрейф (зерно – на тёмном фоне, см. textureLayers).
-        assert.deepEqual([drift.length, grain.length], [1, 0]);
-        assert.equal(drift[0].props.frame, 117, 'дрейф сцены – от глобального кадра');
-      } else {
-        assert.deepEqual([drift.length, grain.length], [0, 0]);
+    const props = buildMotionProps({ brief: value });
+    // 30 fps, 12 кадров перехода: push 84..95 (lead 6), wipe 180..191.
+    const plan = planSceneTransitions(value.scenes, 30);
+    assert.deepEqual(plan.map(({ from, durationInFrames }) => [from, durationInFrames]), [[0, 96], [84, 108], [180, 90]]);
+    const overlap = (frame) => (frame >= 84 && frame <= 95) || (frame >= 180 && frame <= 191);
+    for (const global of [0, 50, 83, 84, 89, 90, 95, 96, 120, 179, 180, 185, 191, 192, 269]) {
+      state.frame = global;
+      const all = children(MotionDirector(props));
+      const sequences = all.filter((el) => typeof el.props?.name === 'string' && el.props.name.startsWith('motion-scene-'));
+      assert.equal(sequences.length, 3);
+      // Слой корня – ровно один дрейф вне сцен.
+      assert.equal(all.filter((el) => el.type?.name === 'Drift').length, texture === 'subtle' ? 1 : 0);
+      const mounted = sequences.map((seq, index) => ({ seq, local: global - plan[index].from }))
+        .filter(({ seq, local }) => local >= 0 && local < seq.props.durationInFrames);
+      assert.equal(mounted.length, overlap(global) ? 2 : 1, `кадр ${global}`);
+      for (const { seq, local } of mounted) {
+        const [first, ...rest] = React.Children.toArray(seq.props.children);
+        // Фон – первый слой сцены, под стоп-кадром содержимого, и не замораживается вместе с ним.
+        assert.equal(first.type?.name, 'SceneBackdrop', 'первый слой сцены – фон');
+        assert.ok(rest.some((el) => typeof el.props?.active === 'function'), 'содержимое после фона');
+        state.frame = local;
+        const backdrop = first.type(first.props);
+        state.frame = global;
+        if (!overlap(global)) {
+          assert.equal(backdrop, null, `${texture}, кадр ${global}: вне перехода фона сцены нет`);
+          continue;
+        }
+        assert.ok(isBackdrop(backdrop), `${texture}, кадр ${global}: в переходе у сцены непрозрачный фон`);
+        assert.equal(backdrop.props.style.background, motionTheme.background);
+        const inner = children(backdrop);
+        const drift = inner.filter((el) => el.type?.name === 'Drift');
+        const grain = inner.filter((el) => el.type?.name === 'Grain');
+        if (texture === 'subtle') {
+          // Тема motion-neutral светлая: зерна нет, только дрейф (зерно – на тёмном фоне, см. textureLayers).
+          assert.deepEqual([drift.length, grain.length], [1, 0]);
+          assert.equal(drift[0].props.frame, global, 'дрейф сцены – от глобального кадра');
+        } else {
+          assert.deepEqual([drift.length, grain.length], [0, 0]);
+        }
       }
-    });
+    }
   }
 });
 
