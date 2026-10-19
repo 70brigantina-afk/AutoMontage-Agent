@@ -16,14 +16,40 @@ const GRAIN = path.join(ROOT, 'public/textures/grain-256.png');
 const math = () => loadMotion('src/details/texture.js');
 const sha = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
-test('grainOffset is stable for two frames, changes every second step, and repeats between runs', () => {
+test('grainOffset is static by default: one deterministic offset for every frame, seed changes it', () => {
   const { grainOffset } = math();
-  assert.deepEqual(grainOffset(10), grainOffset(11));
-  assert.notDeepEqual(grainOffset(10), grainOffset(12));
+  // Зерно, меняющееся раз в 2 кадра, – полнокадровый шум: h264 его не сжимает (78–136 МБ на 27 с).
+  for (const frame of [0, 1, 2, 10, 11, 12, 40, 899]) assert.deepEqual(grainOffset(frame), grainOffset(0), `кадр ${frame}`);
   assert.deepEqual(grainOffset(40), math().grainOffset(40));
   const { x, y } = grainOffset(10);
   assert.ok(Number.isInteger(x) && Number.isInteger(y) && x >= 0 && x < 256 && y >= 0 && y < 256);
   assert.notDeepEqual(grainOffset(10, { seed: 8 }), grainOffset(10));
+});
+
+test('grainOffset animated: true is an explicit opt-in that keeps the old 2-frame step', () => {
+  const { grainOffset } = math();
+  const animated = { animated: true };
+  assert.deepEqual(grainOffset(10, animated), grainOffset(11, animated));
+  assert.notDeepEqual(grainOffset(10, animated), grainOffset(12, animated));
+  assert.deepEqual(grainOffset(0, animated), grainOffset(0));
+});
+
+test('isDarkBackground: relative luminance < 0.4 for #rgb, #rrggbb and rgb()', () => {
+  const { isDarkBackground } = math();
+  const { motionTheme } = loadMotion('src/motion/motion-theme.js');
+  assert.equal(isDarkBackground(motionTheme.background), false, 'светлая тема motion-neutral');
+  for (const dark of ['#000', '#111111', '#202A36', 'rgb(20, 30, 40)', 'rgba(0,0,0,1)', '#335E99', '#777777']) {
+    assert.equal(isDarkBackground(dark), true, dark);
+  }
+  for (const light of ['#fff', '#EDF0F4', '#FFFFFF', 'rgb(237, 240, 244)', '#BBBBBB']) {
+    assert.equal(isDarkBackground(light), false, light);
+  }
+  // #AAAAAA: L ≈ 0.402 – уже светлый; #A9A9A9: L ≈ 0.397 – ещё тёмный (порог 0.4).
+  assert.equal(isDarkBackground('#AAAAAA'), false);
+  assert.equal(isDarkBackground('#A9A9A9'), true);
+  for (const bad of [undefined, null, '', 'navy', '#12', 'linear-gradient(#000, #000)']) {
+    assert.equal(isDarkBackground(bad), false, String(bad));
+  }
 });
 
 test('driftAt loops after 8 seconds and never exceeds the amplitude', () => {
@@ -134,14 +160,29 @@ test('without style.texture there is no Grain, Drift or Sheen', () => {
   }
 });
 
-test('subtle puts Drift and Grain before the scene container, under the text', () => {
+test('subtle on the light theme: Drift under the scene container and no Grain', () => {
   const html = render({ scenes: [cardScene], style: { texture: 'subtle' } });
   const drift = html.indexOf('data-texture-drift');
-  const grain = html.indexOf('data-texture-grain');
   const scene = html.indexOf('data-motion-safe');
-  assert.ok(drift >= 0 && grain > drift && scene > grain);
-  assert.match(html, /url\(data:image\/png;base64,/);
+  assert.ok(drift >= 0 && scene > drift);
+  assert.doesNotMatch(html, /data-texture-grain/, 'на светлом фоне зерна нет');
   assert.doesNotMatch(html, /grain-256\.png/);
+});
+
+test('textureLayers: Grain goes after Drift only on a dark background, nothing without subtle', () => {
+  const { textureLayers } = loadMotion('src/MotionDirector.jsx');
+  const html = (props) => renderToStaticMarkup(React.createElement(React.Fragment, null, textureLayers(props)));
+  const dark = html({ texture: 'subtle', background: '#14181F' });
+  const drift = dark.indexOf('data-texture-drift');
+  const grain = dark.indexOf('data-texture-grain');
+  assert.ok(drift >= 0 && grain > drift);
+  assert.match(dark, /url\(data:image\/png;base64,/);
+  assert.doesNotMatch(html({ texture: 'subtle', background: '#EDF0F4' }), /data-texture-grain/);
+  assert.match(html({ texture: 'subtle', background: '#EDF0F4' }), /data-texture-drift/);
+  assert.equal(html({ texture: 'none', background: '#14181F' }), '');
+  // Фон сцены в режиме переходов передаёт глобальный кадр обоим слоям.
+  const layers = textureLayers({ texture: 'subtle', background: '#14181F', frame: 117 }).props.children.filter(Boolean);
+  assert.deepEqual(layers.map((el) => [el.type.name, el.props.frame]), [['Drift', 117], ['Grain', 117]]);
 });
 
 test('Sheen appears on a card entry only when texture is subtle', () => {
@@ -167,11 +208,12 @@ test('Sheen colour contrasts with the panel and the cta sheen starts at the acti
 
 test('motion-kit exports the texture parts', () => {
   const kit = loadMotion('src/motion-kit/index.js');
-  for (const name of ['Grain', 'Drift', 'Sheen', 'grainOffset', 'driftAt', 'sheenProgress']) assert.ok(kit[name], name);
+  for (const name of ['Grain', 'Drift', 'Sheen', 'grainOffset', 'driftAt', 'sheenProgress', 'isDarkBackground']) assert.ok(kit[name], name);
 });
 
 test('Grain uses an inlined data URI byte-identical to the tracked PNG (isolated render public dir has no textures)', () => {
-  const html = render({ scenes: [cardScene], style: { texture: 'subtle' } });
+  const { Grain } = loadMotion('src/details/Texture.jsx');
+  const html = renderToStaticMarkup(React.createElement(Grain));
   const uri = /url\((data:image\/png;base64,[A-Za-z0-9+/=]+)\)/.exec(html);
   assert.ok(uri, 'grain background is a data URI');
   const bytes = Buffer.from(uri[1].split(',')[1], 'base64');
@@ -225,14 +267,56 @@ test('Sheen is painted before the card content and the content sits above it', (
   assert.match(tag, /z-index:1/);
 });
 
-test('Drift and Grain take an explicit absolute frame: inside a scene they match the root layer at the same composition frame', () => {
+test('Drift takes an explicit absolute frame: inside a scene it matches the root layer at the same composition frame', () => {
   const html = (frame, local, Component) => {
     const mod = loadMotion('src/details/Texture.jsx', { useCurrentFrame: () => local });
     return renderToStaticMarkup(React.createElement(mod[Component], frame === null ? {} : { frame }));
   };
-  for (const Component of ['Grain', 'Drift']) {
-    // Корень на кадре 117 и сцена 2 с локальным кадром 27 (начало sequence – 90) рисуют одно и то же.
-    assert.equal(html(117, 27, Component), html(null, 117, Component), Component);
-    assert.notEqual(html(null, 27, Component), html(null, 117, Component), `${Component}: кадр меняет слой`);
-  }
+  // Корень на кадре 117 и сцена 2 с локальным кадром 27 (начало sequence – 90) рисуют одно и то же.
+  assert.equal(html(117, 27, 'Drift'), html(null, 117, 'Drift'));
+  assert.notEqual(html(null, 27, 'Drift'), html(null, 117, 'Drift'), 'Drift: кадр меняет слой');
+  // Зерно неподвижно: любой кадр даёт один и тот же слой.
+  assert.equal(html(117, 27, 'Grain'), html(null, 117, 'Grain'));
+  assert.equal(html(null, 27, 'Grain'), html(null, 117, 'Grain'), 'Grain: кадр не меняет слой');
+});
+
+// Настоящий рендер: зерно на тёмном фоне неподвижно – кадры 10 и 40 побайтно совпадают и при этом
+// отличаются от того же фона без зерна (зерно действительно нарисовано).
+const GRAIN_FIXTURE = `
+import { AbsoluteFill, Composition, registerRoot } from 'remotion';
+import { Grain } from '@automontage/motion-kit';
+
+function Layer({ grain }) {
+  return <AbsoluteFill style={{ backgroundColor: '#14181F' }}>{grain && <Grain />}</AbsoluteFill>;
+}
+
+registerRoot(() => (
+  <Composition id="Layer" component={Layer} defaultProps={{ grain: true }} durationInFrames={60} fps={30} width={540} height={960} />
+));
+`;
+
+test('real render: Grain on a dark background is static between frames 10 and 40', {
+  skip: process.env.AUTOMONTAGE_TEST_MOTION_RENDER !== '1', timeout: 180_000,
+}, async (t) => {
+  const { bundle } = require('@remotion/bundler');
+  const { openBrowser, renderStill, selectComposition } = require('@remotion/renderer');
+  const { withMotionKitAlias } = require('../scripts/remotion-webpack');
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'grain-static-'));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(work, 'src'));
+  const entryPoint = path.join(work, 'src/index.jsx');
+  fs.writeFileSync(entryPoint, GRAIN_FIXTURE);
+  const serveUrl = await bundle({ entryPoint, publicDir: path.join(ROOT, 'public'), outDir: path.join(work, 'bundle'), webpackOverride: withMotionKitAlias });
+  const browser = await openBrowser('chrome', { logLevel: 'error' });
+  t.after(() => browser.close({ silent: true }));
+  const still = async (frame, grain) => {
+    const inputProps = { grain };
+    const composition = await selectComposition({ serveUrl, id: 'Layer', inputProps, puppeteerInstance: browser });
+    const output = path.join(work, `frame-${frame}-${grain}.png`);
+    await renderStill({ serveUrl, composition, frame, output, inputProps, imageFormat: 'png', puppeteerInstance: browser, logLevel: 'error' });
+    return fs.readFileSync(output);
+  };
+  const [a, b, plain] = [await still(10, true), await still(40, true), await still(10, false)];
+  assert.ok(a.equals(b), 'зерно не меняется между кадрами');
+  assert.ok(!a.equals(plain), 'зерно нарисовано');
 });

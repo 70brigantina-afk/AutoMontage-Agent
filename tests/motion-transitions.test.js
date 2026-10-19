@@ -489,9 +489,9 @@ test('режим переходов: у каждой сцены непрозра
       const drift = inner.filter((el) => el.type?.name === 'Drift');
       const grain = inner.filter((el) => el.type?.name === 'Grain');
       if (texture === 'subtle') {
-        assert.deepEqual([drift.length, grain.length], [1, 1]);
+        // Тема motion-neutral светлая: зерна нет, только дрейф (зерно – на тёмном фоне, см. textureLayers).
+        assert.deepEqual([drift.length, grain.length], [1, 0]);
         assert.equal(drift[0].props.frame, 117, 'дрейф сцены – от глобального кадра');
-        assert.equal(grain[0].props.frame, 117, 'зерно сцены – от глобального кадра');
       } else {
         assert.deepEqual([drift.length, grain.length], [0, 0]);
       }

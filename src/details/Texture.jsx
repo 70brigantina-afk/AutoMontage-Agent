@@ -18,7 +18,8 @@ const useTextureFrame = (frame) => {
   return frame ?? current;
 };
 
-// Зерно лежит под сценой: плитка сдвигается раз в 2 кадра на детерминированный шаг.
+// Зерно лежит под сценой и неподвижно (см. grainOffset). Рисовать только на тёмном фоне:
+// на светлом его не видно, а файл тяжелеет.
 export const Grain = ({ opacity = GRAIN_OPACITY, src = null, frame: absoluteFrame = null }) => {
   const frame = useTextureFrame(absoluteFrame);
   const { x, y } = grainOffset(frame);

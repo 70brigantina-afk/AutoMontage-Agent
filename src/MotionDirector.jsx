@@ -11,6 +11,7 @@ import { MediaScene } from './motion/MediaScene';
 import { CtaScene } from './motion/CtaScene';
 import { motionTheme } from './motion/motion-theme';
 import { Drift, Grain, TextureContext } from './details/Texture.jsx';
+import { isDarkBackground } from './details/texture.js';
 import { TransitionSeries } from '@remotion/transitions';
 import {
   contentFrameAt, getSceneTiming, hasSceneTransitions, planSceneTransitions, presentationFor,
@@ -30,6 +31,14 @@ const sceneElement = (scene, durationInFrames) => {
   return <Component {...scene} durationInFrames={durationInFrames} />;
 };
 
+// Слои текстуры под сценами: subtle – дрейф фона, зерно только на тёмном фоне (на светлом его не
+// видно, а шум раздувает файл). frame – глобальный кадр для фона сцены, без него – текущий кадр.
+export const textureLayers = ({ texture, background = motionTheme.background, frame = null }) => {
+  if (texture !== 'subtle') return null;
+  const props = frame === null ? {} : { frame };
+  return <><Drift {...props} />{isDarkBackground(background) && <Grain {...props} />}</>;
+};
+
 // Режим переходов: TransitionSeries ставит сцены подряд, поэтому паузы между сценами и старт
 // первой сцены задаются offset. Содержимое сцены получает длительность из ТЗ (у push – плюс lead
 // кадров до start, анимация входа начинается в start - lead). Всё после живой части – хвост под
@@ -42,7 +51,7 @@ const sceneElement = (scene, durationInFrames) => {
 // Freeze: стоп-кадр хвоста держит содержимое, но не текстуру.
 const sceneBackdrop = ({ texture, frame }) => (
   <AbsoluteFill data-motion-scene-backdrop="true" style={{ background: motionTheme.background }}>
-    {texture === 'subtle' && <><Drift frame={frame} /><Grain frame={frame} /></>}
+    {textureLayers({ texture, background: motionTheme.background, frame })}
   </AbsoluteFill>
 );
 
@@ -83,8 +92,8 @@ export const MotionDirector = ({ theme = 'motion-neutral', scenes = [], audioSrc
   const texture = style?.texture === 'subtle' ? 'subtle' : 'none';
   return <AbsoluteFill style={{ background: motionTheme.background, fontFamily: motionTheme.fontFamily }}>
     <FontStyle />
-    {/* Дрейф и зерно лежат под сценами (раньше в DOM), поэтому контраст текста не падает. */}
-    {texture === 'subtle' && <><Drift /><Grain /></>}
+    {/* Дрейф (и зерно на тёмном фоне) лежат под сценами (раньше в DOM), поэтому контраст текста не падает. */}
+    {textureLayers({ texture, background: motionTheme.background })}
     {audioSrc && <Audio src={staticFile(audioSrc)} volume={(frame) => sourceVolumeForFrame({ frame, scenes: timedScenes, fps })} />}
     <TextureContext.Provider value={texture}>
     {hasSceneTransitions(scenes)
