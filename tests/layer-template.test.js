@@ -87,7 +87,8 @@ function makeLayer(t, { width = 1080, height = 1920, fps = 25, seconds = 8 } = {
 // папке без своих node_modules), remotion – подмена на заданном кадре.
 function loadLayerFile(layerDir, file, remotion) {
   return loadEsm(path.relative(ROOT, path.join(layerDir, file)), {
-    stubs: { remotion, react: React, 'react/jsx-runtime': require('react/jsx-runtime') },
+    // remotion/no-react тянет @remotion/paths (график motion-kit); без React, берём настоящий модуль.
+    stubs: { remotion, 'remotion/no-react': require('remotion/no-react'), react: React, 'react/jsx-runtime': require('react/jsx-runtime') },
   });
 }
 

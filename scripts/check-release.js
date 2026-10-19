@@ -407,9 +407,9 @@ function checkMotionRelease(files, read, issues) {
       const valid = new Ajv({ allErrors: true, strict: false }).compile(schema)(demo);
       if (!valid || demo.kind !== 'motion-reel' || demo.status !== 'draft'
         || demo.theme !== 'motion-neutral'
-        || ['kinetic-title', 'card', 'steps', 'list', 'counter', 'media', 'cta'].some(
+        || ['kinetic-title', 'card', 'steps', 'list', 'counter', 'media', 'cta', 'chart'].some(
           scene => !demo.scenes?.some(entry => entry.scene === scene))) {
-        problem(demoFile, 'public motion demo must be a valid neutral draft covering all seven scenes');
+        problem(demoFile, 'public motion demo must be a valid neutral draft covering all eight scenes');
       }
     } catch (_) { problem(demoFile, 'motion demo or candidate schema is invalid'); }
   }

@@ -37,9 +37,17 @@
 | `card` | `title` ≤80, optional `body` ≤240 |
 | `steps` | 2–4 `steps`, каждый ≤60, optional `title` ≤80 |
 | `list` | 2–4 `items`, каждый ≤80, optional `title` ≤80 |
-| `counter` | `label` ≤80, числовое `value`, optional `prefix`/`suffix` ≤16 |
+| `counter` | `label` ≤80, числовое `value`, optional `prefix`/`suffix` ≤16, optional `layout`: `inline` (по умолчанию) или `stack` |
 | `media` | `media: {kind, src, sha256, fit}`, optional `overlayText` ≤120 |
 | `cta` | `title`, `action` ≤80, optional `handle` ≤80 |
+| `chart` | `title` ≤80, `chartType`: `bar`, `line` или `bar-to-line`, 2–8 `points` (`label` ≤24, `value` ≥0), optional `unit` ≤16, optional `highlight` (индекс точки с нуля) |
+
+Сцена `counter` крутит число одометром (по умолчанию 1,5 с), число и подписи графика берутся
+дословно из речи или утверждённого ТЗ. Рилс держи в 6 столбиках и меньше, акцент (`highlight`)
+ставь на одну точку.
+
+Необязательное `style.texture` в корне brief: `none` (по умолчанию) или `subtle` (зерно, дрейф
+фона и блик на входе карточки под текстом). Для новых ТЗ ставь `subtle`.
 
 Optional `caption` ≤160. Верхние ограничения не цель: оставляй время на чтение.
 `media.kind` – `image` или `video`; `fit` – `contain` или `cover`. У video допустимы

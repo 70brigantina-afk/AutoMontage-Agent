@@ -16,13 +16,13 @@ function makeBrief(overrides = {}) {
     status: 'draft',
     source: 'input/narration.mp3',
     theme: 'motion-neutral',
-    title: 'Семь сцен',
+    title: 'Восемь сцен',
     output: {
       aspect: 'vertical',
       width: 1080,
       height: 1920,
       fps: 30,
-      durationInFrames: 630,
+      durationInFrames: 720,
     },
     scenes: [
       { scene: 'kinetic-title', start: 0, end: 3, text: 'Главная мысль', emphasis: 'мысль' },
@@ -43,12 +43,16 @@ function makeBrief(overrides = {}) {
         overlayText: 'Проверенный файл',
       },
       { scene: 'cta', start: 18, end: 21, title: 'Сохраните', action: 'Подпишитесь', handle: '@example' },
+      {
+        scene: 'chart', start: 21, end: 24, title: 'Рост', chartType: 'bar',
+        points: [{ label: 'Раз', value: 10 }, { label: 'Два', value: 20 }],
+      },
     ],
     ...overrides,
   };
 }
 
-test('motion brief accepts the seven official scene contracts', () => {
+test('motion brief accepts the eight official scene contracts', () => {
   assert.deepEqual(MOTION_SCENES, [
     'kinetic-title',
     'card',
@@ -57,6 +61,7 @@ test('motion brief accepts the seven official scene contracts', () => {
     'counter',
     'media',
     'cta',
+    'chart',
   ]);
   assert.deepEqual(validateMotionBrief(makeBrief()), { ok: true, errors: [] });
 });
@@ -78,7 +83,7 @@ test('motion brief rejects overlapping, off-frame and over-duration timing', () 
     },
     {
       name: 'past narration',
-      scenes: [{ scene: 'card', start: 20, end: 22, title: 'Слишком поздно' }],
+      scenes: [{ scene: 'card', start: 23, end: 25, title: 'Слишком поздно' }],
       pattern: /длительност/i,
     },
   ];
@@ -193,13 +198,13 @@ test('draft and approved builders enforce status and expose camera-free props', 
 
   const approvedProps = buildMotionProps({ brief: approved, sourceFile: 'voice.wav' });
   assert.equal(approvedProps.audioSrc, 'voice.wav');
-  assert.equal(approvedProps.durationInFrames, 630);
+  assert.equal(approvedProps.durationInFrames, 720);
   assert.equal(Object.hasOwn(approvedProps, 'faceSrc'), false);
 });
 
 test('motion Markdown identifies status and summarizes every scene', () => {
   const markdown = formatMotionBriefMarkdown(makeBrief());
-  assert.match(markdown, /^# Motion Reel: Семь сцен$/m);
+  assert.match(markdown, /^# Motion Reel: Восемь сцен$/m);
   assert.match(markdown, /^Статус: `draft`$/m);
   for (const scene of MOTION_SCENES) assert.match(markdown, new RegExp(`\\| ${scene} \\|`));
 });

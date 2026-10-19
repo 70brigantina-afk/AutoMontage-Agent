@@ -19,7 +19,7 @@ test('MotionReel metadata keeps narration duration, geometry and FPS from valida
   assert.equal(comp.props.fps, 30);
   const props = buildMotionProps({ brief: brief() });
   assert.deepEqual(comp.props.calculateMetadata({ props }), {
-    durationInFrames: 660, width: 1080, height: 1920, fps: 30,
+    durationInFrames: 720, width: 1080, height: 1920, fps: 30,
   });
   assert.deepEqual(comp.props.calculateMetadata({ props: { ...props, width: 720, height: 1280, fps: 25, durationInFrames: 550 } }), {
     durationInFrames: 550, width: 720, height: 1280, fps: 25,
@@ -36,7 +36,7 @@ test('one narration Audio is at root frame zero, scenes have global sequences an
   assert.equal(audio.length, 1);
   assert.equal(audio[0].props.src, '/static/narration.mp3');
   assert.equal(audio[0].props.trimBefore, undefined);
-  assert.equal(sequences.length, 7);
+  assert.equal(sequences.length, 8);
   sequences.forEach((seq, index) => {
     assert.equal(seq.props.from, index * 90);
     assert.equal(seq.props.durationInFrames, 90);
@@ -72,18 +72,6 @@ test('steps reveal node, then connector, then next node in local frame time', ()
   }
 });
 
-test('counter interpolates signed, fractional and extreme approved values and finishes exactly', () => {
-  const { counterValue } = loadMotion('src/motion/CounterScene.jsx');
-  for (const value of [42, -123.45, 0.000001, 1e100, Number.MAX_VALUE]) {
-    assert.equal(counterValue(0, 30, 90, value), 0);
-    const middle = counterValue(15, 30, 90, value);
-    assert.ok(Number.isFinite(middle));
-    assert.ok(Math.abs(middle) > 0 && Math.abs(middle) < Math.abs(value));
-    assert.equal(counterValue(89, 30, 90, value), value);
-    assert.equal(counterValue(0, 30, 1, value), value);
-  }
-});
-
 test('short scenes show all content on the last frame, including one-frame scenes', () => {
   const { stepState } = loadMotion('src/motion/StepsScene.jsx');
   for (const duration of [1, 2, 5, 15]) {
@@ -91,7 +79,7 @@ test('short scenes show all content on the last frame, including one-frame scene
   }
 });
 
-test('counter component actually renders intermediate numeric text, not just final approved value', () => {
+test('counter component rolls digits mid-scene and rests on the approved string at the last frame', () => {
   let frame = 0;
   const { CounterScene } = loadMotion('src/motion/CounterScene.jsx', { useCurrentFrame: () => frame });
   const scene = { label: 'Рост', value: 100, suffix: '%', durationInFrames: 90 };
@@ -99,8 +87,9 @@ test('counter component actually renders intermediate numeric text, not just fin
     frame = nextFrame;
     return renderToStaticMarkup(React.createElement(CounterScene, scene));
   };
-  assert.match(at(0), /data-counter-value="0"/);
-  const mid = at(15);
-  assert.doesNotMatch(mid, /data-counter-value="(?:0|100)"/);
-  assert.match(at(89), /data-counter-value="100"/);
+  assert.match(at(15), /data-odometer-roll/);
+  const last = at(89);
+  assert.doesNotMatch(last, /data-odometer-roll/);
+  assert.match(last, /data-counter-value="100"/);
+  assert.match(last, /100<\/span>/);
 });

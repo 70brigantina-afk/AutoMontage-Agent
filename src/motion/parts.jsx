@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from 'react';
 import { cancelRender, continueRender, delayRender, useCurrentFrame, useVideoConfig } from 'remotion';
 import { safeFor } from '../scenes/safezone';
+import { Sheen, useTexture } from '../details/Texture.jsx';
 import { motionTheme as t, motionPresets, revealProgress } from './motion-theme';
 
 export const MOTION_WIDTH = 1080;
@@ -76,7 +77,13 @@ export const SceneFrame = ({ children, caption }) => {
   </div>;
 };
 
-export const Panel = ({ children, style = {} }) => <div style={{
-  background: t.panel, borderRadius: t.radius, padding: 38, boxSizing: 'border-box',
-  border: `1px solid ${t.line}`, ...style,
-}}>{children}</div>;
+export const Panel = ({ children, style = {}, sheenFrame = 0 }) => {
+  const subtle = useTexture() === 'subtle';
+  const background = style.background || t.panel;
+  // Блик контрастирует с фоном карточки: на светлой панели акцентно-светлый, на акцентной белый.
+  const sheenColor = background === t.panel ? t.accentSoft : t.panel;
+  return <div style={{
+    background: t.panel, borderRadius: t.radius, padding: 38, boxSizing: 'border-box',
+    border: `1px solid ${t.line}`, ...(subtle ? { position: 'relative' } : {}), ...style,
+  }}>{subtle && <Sheen enterFrame={Math.round(sheenFrame)} color={sheenColor} />}{subtle ? <div data-panel-content="true" style={{ position: 'relative', zIndex: 1 }}>{children}</div> : children}</div>;
+};

@@ -9,6 +9,10 @@ function children(element) {
   return [element, ...React.Children.toArray(element.props?.children).flatMap(children)];
 }
 
+// Слои sequence в режиме переходов: фон сцены и стоп-кадр содержимого.
+const isBackdrop = (el) => el.props?.['data-motion-scene-backdrop'] === 'true';
+const freezeOf = (seq) => React.Children.toArray(seq.props.children).find((el) => typeof el.props?.active === 'function');
+
 const card = (start, end, extra = {}) => ({ scene: 'card', title: `Сцена ${start}`, start, end, ...extra });
 
 function twoScenes(transition, { first = [0, 3], second = [3, 6] } = {}) {
@@ -173,7 +177,7 @@ test('MotionDirector с push: содержимое второй сцены дл�
   const all = children(MotionDirector(buildMotionProps({ brief: value })));
   const sequences = all.filter((el) => typeof el.props?.name === 'string' && el.props.name.startsWith('motion-scene-'));
   assert.deepEqual(sequences.map((el) => [el.props.durationInFrames, el.props.offset]), [[80, 0], [80, 0]]);
-  const [first, second] = sequences.map((seq) => seq.props.children);
+  const [first, second] = sequences.map(freezeOf);
   // Хвост после номинального конца – стоп-кадр последнего номинального кадра.
   assert.equal(first.props.frame, 74);
   assert.equal(first.props.active(74), false);
@@ -323,7 +327,7 @@ test('MotionDirector без не-cut переходов рендерит пре�
   for (const value of [base, cut]) {
     const all = children(MotionDirector(buildMotionProps({ brief: value })));
     const sequences = all.filter((el) => el.type === 'sequence');
-    assert.equal(sequences.length, 7);
+    assert.equal(sequences.length, 8);
     sequences.forEach((seq, index) => {
       assert.equal(seq.props.from, index * 90);
       assert.equal(seq.props.durationInFrames, 90);
@@ -346,8 +350,8 @@ test('MotionDirector с fade собирает TransitionSeries, звук и со
   assert.deepEqual(sequences.map((el) => [el.props.durationInFrames, el.props.offset]), [[102, 0], [90, 0], [90, 0]]);
   // Содержимое – прежняя длительность из ТЗ внутри стоп-кадра хвоста.
   sequences.forEach((seq) => {
-    assert.equal(seq.props.children.props.frame, 89);
-    assert.equal(seq.props.children.props.children.props.durationInFrames, 90);
+    assert.equal(freezeOf(seq).props.frame, 89);
+    assert.equal(freezeOf(seq).props.children.props.durationInFrames, 90);
   });
   const transitions = all.filter((el) => el.props?.timing && el.props?.presentation);
   assert.equal(transitions.length, 1);
@@ -464,4 +468,136 @@ test('реальный кадр: хвост видео-сцены через п�
   const middle = await still(81);
   const share = frameEdgeShare(middle, null);
   assert.ok(Number.isFinite(share) && share > SHARE_THRESHOLD, `G12 edgeShare ${share}`);
+});
+
+test('режим переходов: у каждой сцены непрозрачный фон сцены, текстура в нём идёт от глобального кадра', () => {
+  const { motionTheme } = loadMotion('src/motion/motion-theme.js');
+  for (const texture of ['subtle', 'none']) {
+    const { MotionDirector } = loadMotion('src/MotionDirector.jsx', { useCurrentFrame: () => 117 });
+    const value = brief({ style: { texture }, scenes: [card(0, 3), card(3, 6, { transition: { type: 'push' } }),
+      card(6, 9, { transition: { type: 'wipe' } })] });
+    const all = children(MotionDirector(buildMotionProps({ brief: value })));
+    const sequences = all.filter((el) => typeof el.props?.name === 'string' && el.props.name.startsWith('motion-scene-'));
+    assert.equal(sequences.length, 3);
+    sequences.forEach((seq) => {
+      const [first, ...rest] = React.Children.toArray(seq.props.children);
+      // Фон – первый слой сцены, под стоп-кадром содержимого, и не замораживается вместе с ним.
+      assert.ok(isBackdrop(first), `${texture}: первый слой сцены – фон`);
+      assert.equal(first.props.style.background, motionTheme.background);
+      assert.ok(rest.some((el) => typeof el.props?.active === 'function'), 'содержимое после фона');
+      const inner = children(first);
+      const drift = inner.filter((el) => el.type?.name === 'Drift');
+      const grain = inner.filter((el) => el.type?.name === 'Grain');
+      if (texture === 'subtle') {
+        assert.deepEqual([drift.length, grain.length], [1, 1]);
+        assert.equal(drift[0].props.frame, 117, 'дрейф сцены – от глобального кадра');
+        assert.equal(grain[0].props.frame, 117, 'зерно сцены – от глобального кадра');
+      } else {
+        assert.deepEqual([drift.length, grain.length], [0, 0]);
+      }
+    });
+  }
+});
+
+test('без переходов фона сцены нет: слои и порядок прежние', () => {
+  const { MotionDirector } = loadMotion('src/MotionDirector.jsx');
+  for (const texture of ['subtle', 'none']) {
+    const value = brief({ style: { texture } });
+    const all = children(MotionDirector(buildMotionProps({ brief: value })));
+    assert.equal(all.some(isBackdrop), false, texture);
+    all.filter((el) => el.type === 'sequence').forEach((seq) => {
+      assert.equal(typeof seq.props.children.type, 'function', 'внутри Sequence только сцена');
+    });
+  }
+});
+
+test('push: уходящая сцена не видна с прогресса cutProgress, до склейки видна полностью', () => {
+  const { renderToStaticMarkup } = require('react-dom/server');
+  const { presentationFor, resolveTransition } = loadMotion('src/motion/transitions.js');
+  for (const fps of [25, 30]) {
+    const transition = resolveTransition({ type: 'push', frames: 10 }, fps);
+    const { presentation } = presentationFor(transition, { width: 1080, height: 1920 });
+    const cut = presentation.props.cutProgress;
+    const outerOpacity = (direction, progress) => {
+      const html = renderToStaticMarkup(React.createElement(presentation.component, {
+        presentationDirection: direction, presentationProgress: progress,
+        presentationDurationInFrames: transition.frames, passedProps: presentation.props,
+      }, React.createElement('span', null, 'сцена')));
+      return Number(/^<div[^>]*style="[^"]*opacity:\s*([\d.]+)/.exec(html)[1]);
+    };
+    for (const progress of [0, cut / 2, cut - 0.001]) {
+      assert.equal(outerOpacity('exiting', progress), 1, `${fps} fps: до склейки ${progress}`);
+      assert.equal(outerOpacity('entering', progress), 0, `${fps} fps: входящая до склейки ${progress}`);
+    }
+    for (const progress of [cut, cut + 0.001, 0.9, 1]) {
+      assert.equal(outerOpacity('exiting', progress), 0, `${fps} fps: после склейки ${progress}`);
+      assert.equal(outerOpacity('entering', progress), 1, `${fps} fps: входящая после склейки ${progress}`);
+    }
+  }
+});
+
+test('реальный кадр push сразу после склейки: уходящей сцены нет ни в DOM, ни в пикселях', {
+  skip: process.env.AUTOMONTAGE_TEST_MOTION_RENDER !== '1', timeout: 300_000,
+}, async (t) => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const os = require('node:os');
+  const { execFileSync } = require('node:child_process');
+  const { bundle } = require('@remotion/bundler');
+  const { openBrowser, renderStill, selectComposition } = require('@remotion/renderer');
+  const root = path.join(__dirname, '..');
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'motion-transition-push-'));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+  const publicDir = path.join(work, 'public');
+  fs.mkdirSync(publicDir, { recursive: true });
+  const ffmpeg = process.env.AUTOMONTAGE_FFMPEG_DIR
+    ? path.join(process.env.AUTOMONTAGE_FFMPEG_DIR, 'ffmpeg') : 'ffmpeg';
+  execFileSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=7', path.join(publicDir, 'narration.wav')]);
+  const serveUrl = await bundle({ entryPoint: path.join(root, 'src/index.js'), publicDir, outDir: path.join(work, 'bundle') });
+  const browser = await openBrowser('chrome', { logLevel: 'error' });
+  t.after(() => browser.close({ silent: true }));
+  // Видимые тексты: произведение opacity предков > 0.05 и пересечение с кадром.
+  const texts = [];
+  const newPage = browser.newPage.bind(browser);
+  browser.newPage = async (...args) => {
+    const page = await newPage(...args);
+    const close = page.close.bind(page);
+    page.close = async (...closeArgs) => {
+      try {
+        texts.push(await page.evaluate(() => [...document.querySelectorAll('[data-motion-text]')].filter((el) => {
+          let opacity = 1;
+          for (let node = el; node && node.nodeType === 1; node = node.parentElement) {
+            opacity *= Number(getComputedStyle(node).opacity);
+          }
+          const rect = el.getBoundingClientRect();
+          return opacity > 0.05 && rect.right > 0 && rect.bottom > 0
+            && rect.left < window.innerWidth && rect.top < window.innerHeight;
+        }).map((el) => el.textContent)));
+      } finally { await close(...closeArgs); }
+    };
+    return page;
+  };
+  // 30 fps, push 10 кадров эталона = 12 кадров, lead 6: склейка на кадре 90 (start второй сцены).
+  const render = async (firstTitle, frame) => {
+    const value = brief({ output: { ...brief().output, durationInFrames: 180 }, style: { texture: 'subtle' }, scenes: [
+      { scene: 'card', title: firstTitle, start: 0, end: 3 },
+      { scene: 'card', title: 'Вторая сцена', start: 3, end: 6, transition: { type: 'push' } },
+    ] });
+    assert.equal(validateMotionBrief(value).ok, true, validateMotionBrief(value).errors.join('; '));
+    const inputProps = buildMotionProps({ brief: value, sourceFile: 'narration.wav' });
+    const composition = await selectComposition({ serveUrl, id: 'MotionReel', inputProps, puppeteerInstance: browser });
+    const output = path.join(work, `${firstTitle.length}-${frame}.png`);
+    await renderStill({ serveUrl, composition: { ...composition, props: inputProps }, inputProps,
+      puppeteerInstance: browser, frame, imageFormat: 'png', output, logLevel: 'error' });
+    return { file: output, visible: (texts.at(-1) || []).join(' ') };
+  };
+  const before = await render('Первая сцена', 89);
+  assert.match(before.visible, /Первая сцена/);
+  assert.doesNotMatch(before.visible, /Вторая сцена/);
+  const after = await render('Первая сцена', 91);
+  assert.match(after.visible, /Вторая сцена/);
+  assert.doesNotMatch(after.visible, /Первая сцена/, 'двойная экспозиция: уходящая сцена видна после склейки');
+  // Пиксели: другой заголовок уходящей сцены не меняет кадр после склейки.
+  const other = await render('Совсем другой заголовок первой', 91);
+  assert.ok(fs.readFileSync(other.file).equals(fs.readFileSync(after.file)), 'уходящая сцена просвечивает в пикселях');
 });

@@ -36,13 +36,15 @@ const scenes = [
   { scene: 'counter', label: dense(80), value: -1234567.89, prefix: dense(16), suffix: dense(16) },
   { scene: 'media', overlayText: dense(120), media: { kind: 'image', src: 'assets/test.png', sha256: 'a'.repeat(64), fit: 'contain' } },
   { scene: 'cta', title: dense(80), action: dense(80), handle: dense(80) },
+  { scene: 'chart', title: dense(80), chartType: 'bar-to-line', unit: dense(16), highlight: 7,
+    points: Array.from({ length: 8 }, (_, index) => ({ label: dense(24), value: (index + 1) * 123456 })) },
 ].map((scene, index) => ({ ...scene, start: index * 3, end: (index + 1) * 3 }));
 function brief(overrides = {}) {
   return {
     version: 1, kind: 'motion-reel', status: 'approved', source: 'input/narration.wav',
     approval: { draftSha256: 'a'.repeat(64), sourceSha256: 'b'.repeat(64), previewSha256: 'c'.repeat(64), confirmedAt: '2026-09-08T10:00:00.000Z' },
     theme: 'motion-neutral', title: 'Общедоступные сцены',
-    output: { aspect: 'vertical', width: 1080, height: 1920, fps: 30, durationInFrames: 660 },
+    output: { aspect: 'vertical', width: 1080, height: 1920, fps: 30, durationInFrames: 720 },
     scenes, ...overrides,
   };
 }

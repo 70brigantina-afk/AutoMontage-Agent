@@ -129,7 +129,7 @@ function neutralToneWav(scenes, sampleRate = 24000) {
   bytes.writeUInt32LE(sampleRate, 24); bytes.writeUInt32LE(sampleRate * 2, 28);
   bytes.writeUInt16LE(2, 32); bytes.writeUInt16LE(16, 34); bytes.write('data', 36);
   bytes.writeUInt32LE(samples * 2, 40);
-  const frequencies = [220, 275, 330, 440, 330, 275, 220];
+  const frequencies = [220, 275, 330, 440, 330, 275, 220, 330];
   let sceneIndex = 0;
   for (let i = 0; i < samples; i += 1) {
     const time = i / sampleRate;
@@ -171,17 +171,19 @@ function neutralMotionImage() {
 function buildMotionDemoFixture() {
   const imageBytes = neutralMotionImage();
   // Native reveal timing leaves a deliberate reading hold in the two dense scenes.
-  const durations = [3, 3, 5, 7, 3, 3, 3];
+  const durations = [3, 3, 5, 7, 3, 3, 3, 3];
   let cursor = 0;
   const scenes = [
     { scene: 'kinetic-title', text: 'Идея приходит в движение' },
     { scene: 'card', title: 'Одна мысль', body: 'Каждая сцена объясняет один простой тезис.' },
     { scene: 'steps', title: 'Порядок действий', steps: ['Придумать', 'Проверить', 'Собрать'] },
     { scene: 'list', title: 'Что проверить', items: ['Понятный заголовок', 'Читаемый текст', 'Спокойный ритм', 'Ясный следующий шаг'] },
-    { scene: 'counter', label: 'Типов сцен в этом демо', value: 7 },
+    { scene: 'counter', label: 'Типов сцен в этом демо', value: 8 },
     { scene: 'media', overlayText: 'Нейтральная геометрия', media: { kind: 'image', src: 'assets/neutral.png',
       sha256: createHash('sha256').update(imageBytes).digest('hex'), fit: 'contain' } },
     { scene: 'cta', title: 'Проверьте результат', action: 'Посмотрите полный черновик' },
+    { scene: 'chart', title: 'Рост по этапам', chartType: 'bar-to-line', unit: 'баллов', highlight: 2,
+      points: [{ label: 'Идея', value: 12 }, { label: 'Сборка', value: 28 }, { label: 'Показ', value: 45 }] },
   ].map((scene, index) => {
     const start = cursor;
     cursor += durations[index];

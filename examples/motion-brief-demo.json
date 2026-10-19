@@ -10,7 +10,7 @@
     "width": 1080,
     "height": 1920,
     "fps": 30,
-    "durationInFrames": 810
+    "durationInFrames": 900
   },
   "scenes": [
     {
@@ -52,7 +52,7 @@
     {
       "scene": "counter",
       "label": "Типов сцен в этом демо",
-      "value": 7,
+      "value": 8,
       "start": 18,
       "end": 21
     },
@@ -74,6 +74,29 @@
       "action": "Посмотрите полный черновик",
       "start": 24,
       "end": 27
+    },
+    {
+      "scene": "chart",
+      "title": "Рост по этапам",
+      "chartType": "bar-to-line",
+      "unit": "баллов",
+      "highlight": 2,
+      "points": [
+        {
+          "label": "Идея",
+          "value": 12
+        },
+        {
+          "label": "Сборка",
+          "value": 28
+        },
+        {
+          "label": "Показ",
+          "value": 45
+        }
+      ],
+      "start": 27,
+      "end": 30
     }
   ]
 }

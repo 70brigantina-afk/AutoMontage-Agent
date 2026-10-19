@@ -16,14 +16,14 @@ function temporary(t) {
   return dir;
 }
 
-test('public motion demo brief covers exactly seven frame-aligned scenes with neutral media', () => {
+test('public motion demo brief covers exactly eight frame-aligned scenes with neutral media', () => {
   const brief = JSON.parse(read('examples/motion-brief-demo.json'));
   assert.deepEqual(validateMotionBrief(brief), { ok: true, errors: [] });
   assert.deepEqual(brief.scenes.map(scene => scene.scene), MOTION_SCENES);
   assert.equal(brief.status, 'draft');
   assert.equal(brief.source, 'input/narration.wav');
-  assert.deepEqual(brief.output, { aspect: 'vertical', width: 1080, height: 1920, fps: 30, durationInFrames: 810 });
-  assert.equal(brief.scenes.at(-1).end, 27);
+  assert.deepEqual(brief.output, { aspect: 'vertical', width: 1080, height: 1920, fps: 30, durationInFrames: 900 });
+  assert.equal(brief.scenes.at(-1).end, 30);
 });
 
 test('copyable POSIX preview command quotes literal shell syntax as data', () => {

@@ -352,9 +352,18 @@ motion-vNN/
 | `ShutterFlash({ at })` | React | белая вспышка затвора; `at` – `hitFrame` звука затвора |
 | `SfxTrack({ cues, masterDb })` | React | звуковая дорожка слоя; `masterDb` из `layer.json` (`sfxMasterDb`) |
 | `Subtitles` | React | субтитры с караоке в одну строку, кегль подгоняется по ширине полосы |
+| `Odometer({ value, prefix, suffix, layout, rollSec, ... })` | React | число с прокруткой цифр (1,5 с по умолчанию) и оседанием; в покое ровно форматированная строка; `item.props.view` проектной сцены |
+| `Chart({ points, chartType, unit, highlight, theme, width, height })` | React | график 2–8 точек: `bar`, `line`, `bar-to-line`; цвета и шрифт из `theme` проекта; `item.props.view` проектной сцены |
+| `Grain`, `Drift`, `Sheen` | React | текстура кадра: зерно (≤0,06), дрейф фона (период 8 с), блик на входе карточки; кладутся под текст, подключаются через `item.props.view` |
 | `FontLoader({ faces, children })` | React | ворота шрифтов: `<FontLoader faces={FONTS}>…весь слой…</FontLoader>`, ничего не показывает до загрузки шрифтов |
 
 Уточнения:
+
+- Цвета по умолчанию у `Drift` (`colors`) и `Sheen` (`color`) берутся из темы motion-reel; в проектной сцене передавай свои цвета, иначе текстура выйдет в чужой палитре. У `Grain` цвета нет (меняется только `opacity`, не выше 0,06).
+- `Odometer`, `Chart`, `Grain`, `Drift` и `Sheen` приходят из `@automontage/motion-kit` и
+  подключаются в проектных сценах через `item.props.view` (React-компонент, который рисует
+  элемент). Цвета и шрифты передавай из пропсов проекта; число одометра и подписи графика
+  помечены `data-motion-text` для проверок текста.
 
 - `StockInsert`, `FullscreenReveal` и `KitBox` принимают только скомпилированные элементы
   (из `compilePlan`), а не сырые записи плана.
