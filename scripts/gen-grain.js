@@ -9,6 +9,7 @@ const zlib = require('node:zlib');
 const SIZE = 256;
 const SEED = 20261018;
 const DEFAULT_OUTPUT = path.join(__dirname, '../public/textures/grain-256.png');
+const DEFAULT_MODULE = path.join(__dirname, '../src/details/grain-data.js');
 
 function mulberry32(seed) {
   let state = seed >>> 0;
@@ -63,11 +64,26 @@ function generateGrain() {
   ]);
 }
 
-if (require.main === module) {
-  const output = path.resolve(process.argv[2] || DEFAULT_OUTPUT);
-  fs.mkdirSync(path.dirname(output), { recursive: true });
-  fs.writeFileSync(output, generateGrain());
-  console.log(output);
+// Изолированный public/ рендера не содержит файлов репозитория, поэтому плитку
+// встраиваем как data URI (как шрифты в src/fonts-data.js).
+function grainModuleSource(png) {
+  return `// Автоген scripts/gen-grain.js, не править вручную.\nexport const GRAIN_DATA_URI = 'data:image/png;base64,${png.toString('base64')}';\n`;
 }
 
-module.exports = { generateGrain, SIZE, SEED };
+if (require.main === module) {
+  // Без аргументов пишем PNG и модуль; свой PNG-путь не трогает репозиторный модуль,
+  // если второй аргумент не задан.
+  const png = generateGrain();
+  const output = path.resolve(process.argv[2] || DEFAULT_OUTPUT);
+  const moduleOutput = process.argv[3] ? path.resolve(process.argv[3]) : (process.argv[2] ? null : DEFAULT_MODULE);
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  fs.writeFileSync(output, png);
+  console.log(output);
+  if (moduleOutput) {
+    fs.mkdirSync(path.dirname(moduleOutput), { recursive: true });
+    fs.writeFileSync(moduleOutput, grainModuleSource(png));
+    console.log(moduleOutput);
+  }
+}
+
+module.exports = { generateGrain, grainModuleSource, SIZE, SEED };

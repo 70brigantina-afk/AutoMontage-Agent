@@ -140,7 +140,8 @@ test('subtle puts Drift and Grain before the scene container, under the text', (
   const grain = html.indexOf('data-texture-grain');
   const scene = html.indexOf('data-motion-safe');
   assert.ok(drift >= 0 && grain > drift && scene > grain);
-  assert.match(html, /grain-256\.png/);
+  assert.match(html, /url\(data:image\/png;base64,/);
+  assert.doesNotMatch(html, /grain-256\.png/);
 });
 
 test('Sheen appears on a card entry only when texture is subtle', () => {
@@ -153,4 +154,59 @@ test('Sheen appears on a card entry only when texture is subtle', () => {
 test('motion-kit exports the texture parts', () => {
   const kit = loadMotion('src/motion-kit/index.js');
   for (const name of ['Grain', 'Drift', 'Sheen', 'grainOffset', 'driftAt', 'sheenProgress']) assert.ok(kit[name], name);
+});
+
+test('Grain uses an inlined data URI byte-identical to the tracked PNG (isolated render public dir has no textures)', () => {
+  const html = render({ scenes: [cardScene], style: { texture: 'subtle' } });
+  const uri = /url\((data:image\/png;base64,[A-Za-z0-9+/=]+)\)/.exec(html);
+  assert.ok(uri, 'grain background is a data URI');
+  const bytes = Buffer.from(uri[1].split(',')[1], 'base64');
+  assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), sha(GRAIN));
+  const { GRAIN_DATA_URI } = loadMotion('src/details/grain-data.js');
+  assert.equal(GRAIN_DATA_URI, uri[1]);
+});
+
+test('gen-grain rerun keeps the PNG and the generated module identical', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grain-'));
+  try {
+    const run = (n) => {
+      const png = path.join(dir, `${n}.png`);
+      const mod = path.join(dir, `${n}.js`);
+      execFileSync(process.execPath, [path.join(ROOT, 'scripts/gen-grain.js'), png, mod]);
+      return [fs.readFileSync(png), fs.readFileSync(mod)];
+    };
+    const [pngA, modA] = run('a');
+    const [pngB, modB] = run('b');
+    assert.ok(pngA.equals(pngB) && modA.equals(modB));
+    assert.ok(modA.equals(fs.readFileSync(path.join(ROOT, 'src/details/grain-data.js'))));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('muted, ink and accent text stay >= 4.5 over the worst Drift blend plus worst grain pixel', () => {
+  const { motionTheme } = loadMotion('src/motion/motion-theme.js');
+  const { DRIFT_COLOR_KEYS, DRIFT_OPACITY, GRAIN_OPACITY } = math();
+  const pixels = decodeGray(GRAIN);
+  const levels = [Math.min(...pixels), Math.max(...pixels)];
+  const mix = (base, color) => base.map((c, i) => c * (1 - DRIFT_OPACITY) + color[i] * DRIFT_OPACITY);
+  const [first, second] = DRIFT_COLOR_KEYS.map((key) => hex(motionTheme[key]));
+  const bg = hex(motionTheme.background);
+  const blends = [mix(bg, first), mix(bg, second), mix(mix(bg, first), second)];
+  for (const blend of blends) for (const level of levels) {
+    const pixel = blend.map((c) => c * (1 - GRAIN_OPACITY) + level * GRAIN_OPACITY);
+    for (const name of ['muted', 'ink', 'accent']) {
+      assert.ok(contrast(hex(motionTheme[name]), pixel) >= 4.5, `${name} over ${blend} grain ${level}`);
+    }
+  }
+});
+
+test('Sheen is painted before the card content and the content sits above it', () => {
+  const html = render({ scenes: [cardScene], style: { texture: 'subtle' } }, { useCurrentFrame: () => 4 });
+  const sheen = html.indexOf('data-texture-sheen');
+  const content = html.indexOf('data-panel-content');
+  assert.ok(sheen >= 0 && content > sheen, 'sheen precedes content in DOM');
+  const tag = html.slice(html.lastIndexOf('<', content), html.indexOf('>', content));
+  assert.match(tag, /position:relative/);
+  assert.match(tag, /z-index:1/);
 });

@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef } from 'react';
 import { cancelRender, continueRender, delayRender, useCurrentFrame, useVideoConfig } from 'remotion';
 import { safeFor } from '../scenes/safezone';
 import { Sheen, useTexture } from '../details/Texture.jsx';
-import { motionTheme as t,motionPresets, revealProgress } from './motion-theme';
+import { motionTheme as t, motionPresets, revealProgress } from './motion-theme';
 
 export const MOTION_WIDTH = 1080;
 export const MOTION_HEIGHT = 1920;
@@ -82,5 +82,5 @@ export const Panel = ({ children, style = {} }) => {
   return <div style={{
     background: t.panel, borderRadius: t.radius, padding: 38, boxSizing: 'border-box',
     border: `1px solid ${t.line}`, ...(subtle ? { position: 'relative' } : {}), ...style,
-  }}>{children}{subtle && <Sheen />}</div>;
+  }}>{subtle && <Sheen />}{subtle ? <div data-panel-content="true" style={{ position: 'relative', zIndex: 1 }}>{children}</div> : children}</div>;
 };

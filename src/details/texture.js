@@ -1,6 +1,10 @@
 // Математика текстуры кадра: сдвиг зерна, дрейф фона, проход блика. Без React и тем.
 export const GRAIN_OPACITY = 0.06;
 export const GRAIN_TILE = 256;
+// Непрозрачность слоя дрейфа: от неё зависит худший контраст подписи над пятном.
+export const DRIFT_OPACITY = 0.3;
+// Ключи motionTheme для двух пятен дрейфа: оба не темнее accentSoft, чтобы подпись держала контраст 4.5.
+export const DRIFT_COLOR_KEYS = Object.freeze(['accentSoft', 'panel']);
 const SHEEN_FRAMES_25 = 12;
 
 // Детерминированный хеш (целое от шага и seed): один и тот же кадр всегда даёт один сдвиг.
