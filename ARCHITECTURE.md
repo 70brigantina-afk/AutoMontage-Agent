@@ -320,7 +320,7 @@ byte-identical копии. `reel-turnkey` маршрутизирует запр�
 
 `automontage demo --motion` использует `scripts/project/cli-options.js` и отдельный
 `scripts/motion/demo.js`: из `generate-neutral-fixtures.js` получает детерминированные WAV-тоны,
-PNG-геометрию, иллюстративный transcript/script и все семь сцен. Публикуется только draft
+PNG-геометрию, иллюстративный transcript/script и все восемь сцен. Публикуется только draft
 audio-only workspace, стандартно `projects/motion-demo/`, без Whisper, провайдера и скрытого
 approval/render. Любая существующая папка назначения отклоняется. Tracked
 `examples/motion-brief-demo.json` равен генератору; бинарные данные остаются локальными.

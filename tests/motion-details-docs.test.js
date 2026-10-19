@@ -18,6 +18,13 @@ test('motion-craft: раздел «Детали» с числами одомет
   assert.match(details, /`subtle`/u);
 });
 
+test('одометр: порог сжатия в документах равен коду (2 с), без устаревших 2,6 с', () => {
+  assert.match(read('src/motion/CounterScene.jsx'), /Math\.min\(2,/u);
+  assert.match(details, /короче 2 с/u);
+  assert.doesNotMatch(details, /2,6 с/u);
+  assert.doesNotMatch(read('CHANGELOG.md').split('\n').slice(0, 30).join('\n'), /2,6 с/u);
+});
+
 test('brief-package: сцена chart, layout и style.texture', () => {
   const doc = read('skills/motion-reel/references/brief-package.md');
   assert.match(doc, /\| `chart` \|/u);

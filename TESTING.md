@@ -581,7 +581,7 @@ node scripts/check-release.js --tree "$CANDIDATE_TREE" --base <release-base>
 Git-объект и игнорирует незакоммиченные пользовательские файлы. Обычный development-check
 разрешает pending notes в `[Unreleased]`; флаг `--release` включает строгую проверку кандидата.
 С версии 1.7.0 gate также требует motion schema, зарегистрированную MotionReel-композицию,
-CLI, публичный навык, валидный neutral draft demo со всеми семью сценами и CI-покрытие:
+CLI, публичный навык, валидный neutral draft demo со всеми восемью сценами и CI-покрытие:
 Windows audio probe/workspace плюс Linux motion smoke без secrets. Каждый Windows Node suite
 выполняется отдельным run-step: последующая успешная native-команда не может скрыть ранний отказ. Эти проверки читают
 кандидат как данные; реальные CLI help и renderer проверяет отдельный smoke.
@@ -610,7 +610,7 @@ A/V drift меньше 80 мс, ровно 75 кадров и полный decod
 Третий путь вызывает реальный `automontage demo --motion`, полный preview, preview QA,
 отдельное approval синтетического fixture и approved-only final. Финальный MP4 обязан содержать
 ровно один H.264 video и один AAC audio stream, 1080×1920, 30 FPS, 810 кадров и 27 секунд.
-Проверяются полный decode и hash выбранного render; кадры всех семи сцен и metadata остаются
+Проверяются полный decode и hash выбранного render; кадры всех восьми сцен и metadata остаются
 в `out/release-smoke/`. CLI help проверяется запуском установленного CLI. `tests/env.test.js` проверяет nested/hoisted
 npm layout, ожидаемую package identity и запрет bin symlink за пределы dependency.
 `tests/remotion-package.test.js` выполняет настоящий Webpack bundle JSX под `node_modules` и
@@ -759,7 +759,7 @@ node --test tests/motion-render.test.js
 `PATH=/opt/homebrew/opt/ffmpeg-full/bin:$PATH` и
 `AUTOMONTAGE_FFMPEG_DIR=/opt/homebrew/opt/ffmpeg-full/bin`.
 Тест генерирует локальные PNG/WAV fixtures без ключей, получает реальную metadata MotionReel,
-рендерит все семь сцен с максимальным текстом и ещё раз с длинными непрерывными `Щ` и
+рендерит все восемь сцен с максимальным текстом и ещё раз с длинными непрерывными `Щ` и
 явной подписью. Проверяет DOM-границы текста, caption и safe-zone, а также одну строку
 для числа. Дополнительные кадры показывают ранний hook, шаги/connector, середину счётчика
 и вход CTA. PNG и `layout-measurements.json` остаются в указанной игнорируемой папке;

@@ -56,7 +56,7 @@ Preview, собранные раньше в половину композици�
 Композиция `MotionReel`, тема `motion-neutral`, аудио вместо говорящей головы. Сцены:
 `kinetic-title`, `card`, `steps`, `list`, `counter`, `media`, `cta` – отдельный набор,
 не варианты lesson. Полоса субтитров по умолчанию выключена; optional `caption` задаётся в brief.
-Лимиты полей и media/audioMode описаны в [каталоге](SCENE-CATALOG.md#motionreel-семь-сцен-без-камеры).
+Лимиты полей и media/audioMode описаны в [каталоге](SCENE-CATALOG.md#motionreel-восемь-сцен-без-камеры).
 
 ```bash
 automontage motion narration.mp3 --project "Анимационный ролик"
