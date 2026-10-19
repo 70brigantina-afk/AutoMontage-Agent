@@ -207,8 +207,8 @@ function runMotionReleaseSmoke({ root = ROOT, workDir = path.join(root, 'out/rel
   node('scripts/project/approve-brief.js', [projectDir, 'brief/v01-draft.motion.json', '--confirm-preview-viewed'], 'release motion fixture approval');
   cli(['motion', '--project-dir', projectDir, '--brief', 'brief/v01-approved.motion.json', '--version-label', 'release-smoke'], 'release motion final');
   const motionFinal = assertProjectFinal(projectDir);
-  const metadata = assertMedia(motionFinal, 810, { width: 1080, height: 1920, fps: 30, videoCodec: 'h264', audioCodec: 'aac', audioTracks: 1 }, childEnv);
   const brief = JSON.parse(fs.readFileSync(path.join(projectDir, 'brief/v01-approved.motion.json')));
+  const metadata = assertMedia(motionFinal, brief.output.durationInFrames, { width: 1080, height: 1920, fps: 30, videoCodec: 'h264', audioCodec: 'aac', audioTracks: 1 }, childEnv);
   for (const scene of brief.scenes) runTool('ffmpeg', ['-v', 'error', '-ss', String(scene.end - 0.75),
     '-i', motionFinal, '-frames:v', '1', path.join(working, `${scene.scene}.png`)], { cwd: working, env: childEnv, stage: `motion ${scene.scene} frame` });
   fs.writeFileSync(path.join(working, 'metadata.json'), `${JSON.stringify(metadata, null, 2)}\n`, { flag: 'wx' });
