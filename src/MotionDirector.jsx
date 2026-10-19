@@ -10,6 +10,7 @@ import { CounterScene } from './motion/CounterScene';
 import { MediaScene } from './motion/MediaScene';
 import { CtaScene } from './motion/CtaScene';
 import { motionTheme } from './motion/motion-theme';
+import { Drift, Grain, TextureContext } from './details/Texture.jsx';
 import { TransitionSeries } from '@remotion/transitions';
 import {
   contentFrameAt, getSceneTiming, hasSceneTransitions, planSceneTransitions, presentationFor,
@@ -60,15 +61,19 @@ const renderSceneTransitions = ({ scenes, fps, width, height }) => {
   return <TransitionSeries>{items}</TransitionSeries>;
 };
 
-export const MotionDirector = ({ theme = 'motion-neutral', scenes = [], audioSrc, draftPreview = false }) => {
+export const MotionDirector = ({ theme = 'motion-neutral', scenes = [], audioSrc, draftPreview = false, style }) => {
   const { fps, width, height } = useVideoConfig();
   if (theme !== 'motion-neutral') throw new Error(`Unknown public motion theme: ${theme}`);
   const timedScenes = scenes.map((scene) => ({ scene, ...getMotionTiming(scene, fps),
     audioMode: scene.media?.kind === 'video' ? scene.media.audioMode ?? 'mute' : null,
   }));
+  const texture = style?.texture === 'subtle' ? 'subtle' : 'none';
   return <AbsoluteFill style={{ background: motionTheme.background, fontFamily: motionTheme.fontFamily }}>
     <FontStyle />
+    {/* Дрейф и зерно лежат под сценами (раньше в DOM), поэтому контраст текста не падает. */}
+    {texture === 'subtle' && <><Drift /><Grain /></>}
     {audioSrc && <Audio src={staticFile(audioSrc)} volume={(frame) => sourceVolumeForFrame({ frame, scenes: timedScenes, fps })} />}
+    <TextureContext.Provider value={texture}>
     {hasSceneTransitions(scenes)
       ? renderSceneTransitions({ scenes, fps, width, height })
       : timedScenes.map(({ scene, from, durationInFrames }, index) => (
@@ -76,6 +81,7 @@ export const MotionDirector = ({ theme = 'motion-neutral', scenes = [], audioSrc
           {sceneElement(scene, durationInFrames)}
         </Sequence>
       ))}
+    </TextureContext.Provider>
     {draftPreview && <div data-draft-preview-watermark="true" style={{ position: 'absolute',
       top: '5%', left: '7%', zIndex: 1000, padding: '10px 18px', borderRadius: 8,
       color: motionTheme.ink, background: motionTheme.panel, fontWeight: 800,

@@ -113,6 +113,14 @@
     },
     "source": { "$ref": "#/definitions/projectPath" },
     "theme": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "style": {
+      "description": "Optional frame styling. texture: none (default) or subtle (grain, background drift, card sheen on entry)",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "texture": { "enum": ["none", "subtle"], "default": "none" }
+      }
+    },
     "title": { "$ref": "#/definitions/titleText" },
     "output": {
       "type": "object",

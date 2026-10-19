@@ -242,6 +242,7 @@ function motionProps({ brief, theme, sourceFile = 'narration.mp3' }) {
   return {
     theme: theme ?? brief.theme,
     scenes: brief.scenes,
+    ...(brief.style ? { style: brief.style } : {}),
     audioSrc: sourceFile,
     videoTitle: brief.title,
     width: brief.output.width,
