@@ -273,3 +273,90 @@ test('уроки 09 и 10 ведут на урок 11', () => {
     assert.ok(read(`${GUIDE}/${name}`).includes(`(${LESSON_11})`), name);
   }
 });
+
+// ---- Финальное ревью курса ----
+
+test('промо без речи: фоновая проверка финала смотрит только обложку, надписи проверены до preview (10, 06, словарь)', () => {
+  // scripts/qa/final-qa-job.js: у motion-reel (без съёмки и промо) G14/G15 пропускаются - их проверил барьер preview.
+  const promo = flat(`${GUIDE}/10-ai-promo.md`);
+  assert.doesNotMatch(promo, /проверяются только кадры: обложка и надписи/u);
+  assert.ok(oneSentence(promo, [/обложк/u, /первый кадр/u]), 'урок 10: только обложка - первый кадр');
+  assert.ok(oneSentence(promo, [/[Нн]адписи/u, /до preview/u]), 'урок 10: надписи проверены до preview');
+  assert.match(promo, /⏭️/u);
+  const final = flat(`${GUIDE}/06-final.md`);
+  assert.ok(oneSentence(final, [/без съёмки/u, /промо/u, /надпис/u, /до preview/u]), 'урок 06: надписи у роликов без съёмки и промо');
+  assert.ok(oneSentence(final, [/⏭️/u, /до preview/u]), 'урок 06: в отчёте финала надписи с ⏭️');
+  const glossary = flat(`${GUIDE}/GLOSSARY.md`);
+  const row = (glossary.match(/\| \*\*Проверка финала\*\* \| ([^|]+)\|/u) || [])[1] || '';
+  assert.match(row, /до preview/u);
+});
+
+test('урок 11: техническая подготовка перед рендером не называется «пакетом»', () => {
+  const text = flat(`${GUIDE}/${LESSON_11}`);
+  assert.doesNotMatch(text, /64 секунды пакет|пакет ?[-–] ?64/u);
+  assert.match(text, /подготовка анимаций ?[-–] ?64 секунды/u);
+  assert.match(text, /рендер ролика ?[-–] ?52 секунды/u);
+});
+
+test('цена ключевого кадра зависит от модели: у Nano Banana около 1 кредита (README, 10)', () => {
+  for (const name of ['README.md', '10-ai-promo.md']) {
+    assert.ok(oneSentence(flat(`${GUIDE}/${name}`), [/зависит от модели/u, /Nano Banana около 1\b/u]), name);
+  }
+});
+
+test('урок 06: норма пиков та же, что в коде (true peak −1,5 дБ)', () => {
+  const text = flat(`${GUIDE}/06-final.md`);
+  assert.doesNotMatch(text, /ниже 0 дБ с запасом/u);
+  assert.match(text, /пики не выше −1,5 дБ/u);
+});
+
+test('исключения «финал рендером» везде включают сбой копирования', () => {
+  // AGENTS.md: строка «Утверждено» остаётся, когда preview нельзя продвинуть: фрагмент, 4K,
+  // устаревший preview или сбой копирования.
+  let found = 0;
+  for (const name of fs.readdirSync(path.join(ROOT, GUIDE)).filter(f => f.endsWith('.md'))) {
+    for (const s of sentences(flat(`${GUIDE}/${name}`))) {
+      if (!(/фрагмент/iu.test(s) && /4K/u.test(s) && /устар|прежней версии/iu.test(s))) continue;
+      found += 1;
+      assert.match(s, /копирован[^.]{0,30}? не удал|не удалось скопировать/iu, `${name}: ${s.slice(0, 120)}`);
+    }
+  }
+  assert.ok(found >= 8, `мест со списком исключений: ${found}`);
+});
+
+// GitHub-slug заголовка: нижний регистр, без пунктуации (кроме дефисов и пробелов), пробел → «-».
+// Кириллица и «ё» сохраняются.
+const slugify = heading => heading.trim().toLowerCase()
+  .replace(/[^\p{L}\p{N}\p{M}\s_-]/gu, '')
+  .replace(/ /gu, '-');
+
+const anchorsOf = text => {
+  const seen = new Map();
+  const anchors = new Set();
+  const withoutCode = text.replace(/^```[^]*?^```/gmu, '');
+  for (const m of withoutCode.matchAll(/^#{1,6}\s+(.+?)\s*#*\s*$/gmu)) {
+    const base = slugify(m[1].replace(/`/gu, '').replace(/\[([^\]]*)\]\([^)]*\)/gu, '$1'));
+    const count = seen.get(base) || 0;
+    seen.set(base, count + 1);
+    anchors.add(count ? `${base}-${count}` : base);
+  }
+  return anchors;
+};
+
+test('все ссылки курса ведут на настоящие файлы и якоря', () => {
+  let checkedAnchors = 0;
+  for (const name of fs.readdirSync(path.join(ROOT, GUIDE)).filter(f => f.endsWith('.md'))) {
+    for (const m of read(`${GUIDE}/${name}`).matchAll(/\]\(([^)\s]+)\)/gu)) {
+      const target = m[1];
+      if (/^[a-z]+:/iu.test(target)) continue;
+      const [file, anchor] = target.split('#');
+      const resolved = file ? path.resolve(ROOT, GUIDE, decodeURI(file)) : path.join(ROOT, GUIDE, name);
+      assert.ok(fs.existsSync(resolved), `${name}: битая ссылка ${target}`);
+      if (anchor === undefined || !resolved.endsWith('.md')) continue;
+      const anchors = anchorsOf(fs.readFileSync(resolved, 'utf8'));
+      assert.ok(anchors.has(decodeURIComponent(anchor)), `${name}: нет якоря #${anchor} в ${file || name}`);
+      checkedAnchors += 1;
+    }
+  }
+  assert.ok(checkedAnchors > 10, `проверено якорей: ${checkedAnchors}`);
+});
