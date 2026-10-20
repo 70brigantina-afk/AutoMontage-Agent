@@ -5,7 +5,8 @@ const path = require('node:path');
 
 // Курс «Ролики с нуля» должен описывать движок 1.24: финал сразу после «Утверждаю»,
 // стартовая карточка «Что делаем?», шаг обновления движка (задача 1), а также критик,
-// проверка финала, чистка, «Финал не нужен», 16:9, Windows и новые статьи словаря (задача 2).
+// проверка финала, чистка, «Финал не нужен», 16:9, Windows и новые статьи словаря (задача 2),
+// сквозной урок 11 про промо 16:9 и оглавление на 11 уроков (задача 3).
 
 const ROOT = path.resolve(__dirname, '..');
 const GUIDE = 'docs/reels-guide';
@@ -217,5 +218,58 @@ test('словарь: на 13 статей больше (65 до задачи 2)
   for (const term of ['Критик', 'Чистка ролика', '«Финал не нужен»', 'Вертикаль 9:16 и горизонталь 16:9', 'Ролик без съёмки',
     'Переход', 'Наезд камеры', 'Счётчик', 'График', 'Живой фон', 'Оверлеи Higgsfield', 'Смета', 'doctor']) {
     assert.ok(terms.some(t => t.startsWith(term)), term);
+  }
+});
+
+// ---- Задача 3: урок 11 «Сквозной пример: промо 16:9 за вечер» ----
+
+const LESSON_11 = '11-end-to-end-promo.md';
+const FRAMES = 'docs/images/reels-guide/avtonomka-frames.jpg';
+
+// Относительные ссылки Markdown (страницы и картинки) без внешних адресов и якорей.
+const relativeLinks = text => [...text.matchAll(/\]\(([^)\s]+)\)/gu)]
+  .map(m => m[1])
+  .filter(target => !/^(?:[a-z]+:|#)/iu.test(target))
+  .map(target => decodeURI(target.split('#')[0]));
+
+test('урок 11 существует, а его ссылки и ссылки README курса ведут на настоящие файлы', () => {
+  assert.ok(fs.existsSync(path.join(ROOT, GUIDE, LESSON_11)), 'нет урока 11');
+  for (const name of [LESSON_11, 'README.md']) {
+    const links = relativeLinks(read(`${GUIDE}/${name}`));
+    assert.ok(links.length > 0, `${name}: нет ссылок`);
+    for (const target of links) {
+      assert.ok(fs.existsSync(path.resolve(ROOT, GUIDE, target)), `${name}: битая ссылка ${target}`);
+    }
+  }
+});
+
+test('урок 11: реальные цифры прогона и кадры ролика', () => {
+  const text = flat(`${GUIDE}/${LESSON_11}`);
+  for (const figure of ['7,5', '8,9', '9,0', '8,4 МБ']) assert.ok(text.includes(figure), figure);
+  assert.ok(fs.existsSync(path.join(ROOT, FRAMES)), 'нет картинки кадров');
+  assert.ok(text.includes('../images/reels-guide/avtonomka-frames.jpg'), 'картинка не вставлена');
+  assert.match(text, /«Что делаем\?»/u);
+  assert.match(text, /16:9/u);
+  assert.ok(oneSentence(text, [/смет/u, /«да»/u]), 'смета и «да» в одной фразе');
+  assert.ok(oneSentence(text, [/«Утверждаю»/u, /финал/u]), '«Утверждаю» даёт финал');
+  assert.match(text, CLEANUP_WITH_YES);
+  // Лицензию музыки не обещаем от себя: читатель сверяется со страницей трека.
+  assert.match(text, /условиями на странице трека/u);
+});
+
+test('README курса: 11 уроков, название шире вертикали, новые возможности с правильной оговоркой', () => {
+  const text = flat(`${GUIDE}/README.md`);
+  assert.ok(text.includes(`(${LESSON_11})`), 'нет ссылки на урок 11');
+  assert.match(read(`${GUIDE}/README.md`), /^# Ролики с нуля: ролики для соцсетей и YouTube/mu);
+  for (const word of ['переход', 'наезд', 'счётчик', 'график', 'живой фон', '16:9']) {
+    assert.match(text, new RegExp(word, 'iu'), word);
+  }
+  // Переходы, счётчик, графики и живой фон – для роликов без съёмки и промо; у спикера – наезд.
+  assert.ok(oneSentence(text, [/переход/iu, /счётчик/iu, /без съёмки/iu]), 'оговорка про ролики без съёмки');
+});
+
+test('уроки 09 и 10 ведут на урок 11', () => {
+  for (const name of ['09-publish.md', '10-ai-promo.md']) {
+    assert.ok(read(`${GUIDE}/${name}`).includes(`(${LESSON_11})`), name);
   }
 });
