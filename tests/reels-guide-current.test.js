@@ -276,19 +276,27 @@ test('уроки 09 и 10 ведут на урок 11', () => {
 
 // ---- Финальное ревью курса ----
 
-test('промо без речи: фоновая проверка финала смотрит только обложку, надписи проверены до preview (10, 06, словарь)', () => {
-  // scripts/qa/final-qa-job.js: у motion-reel (без съёмки и промо) G14/G15 пропускаются - их проверил барьер preview.
+test('промо без речи: фоновая проверка финала смотрит только обложку, надписи никто не замеряет - их смотрит человек (10, 06, словарь)', () => {
+  // scripts/qa/final-qa-job.js: у motion-reel (без съёмки и промо) G14/G15 пропускаются (⏭️).
+  // Барьер preview (scripts/qa/motion-preview-gates.js) надписи не замеряет: замер есть только
+  // в final-qa.js. Значит, у этих роликов надписи проверяет человек глазами на preview.
+  const wrong = /проверил[аи]? ещё до preview|проверены (?:ещё )?до preview/u;
   const promo = flat(`${GUIDE}/10-ai-promo.md`);
   assert.doesNotMatch(promo, /проверяются только кадры: обложка и надписи/u);
+  assert.doesNotMatch(promo, wrong);
   assert.ok(oneSentence(promo, [/обложк/u, /первый кадр/u]), 'урок 10: только обложка - первый кадр');
-  assert.ok(oneSentence(promo, [/[Нн]адписи/u, /до preview/u]), 'урок 10: надписи проверены до preview');
-  assert.match(promo, /⏭️/u);
+  assert.ok(oneSentence(promo, [/[Нн]адписи/u, /не замеря/u, /⏭️/u]), 'урок 10: надписи не замеряются, ⏭️');
+  assert.ok(oneSentence(promo, [/глазами/u, /preview/u]), 'урок 10: надписи проверяете глазами на preview');
   const final = flat(`${GUIDE}/06-final.md`);
-  assert.ok(oneSentence(final, [/без съёмки/u, /промо/u, /надпис/u, /до preview/u]), 'урок 06: надписи у роликов без съёмки и промо');
-  assert.ok(oneSentence(final, [/⏭️/u, /до preview/u]), 'урок 06: в отчёте финала надписи с ⏭️');
+  assert.doesNotMatch(final, wrong);
+  assert.ok(oneSentence(final, [/без съёмки/u, /промо/u, /надпис/u, /не замеря/u, /⏭️/u]), 'урок 06: надписи у роликов без съёмки и промо не замеряются');
+  assert.ok(oneSentence(final, [/[Нн]адписи/u, /глазами/u, /preview/u]), 'урок 06: надписи проверяет человек на preview');
   const glossary = flat(`${GUIDE}/GLOSSARY.md`);
   const row = (glossary.match(/\| \*\*Проверка финала\*\* \| ([^|]+)\|/u) || [])[1] || '';
-  assert.match(row, /до preview/u);
+  assert.doesNotMatch(row, wrong);
+  assert.match(row, /не замеря/u);
+  assert.match(row, /⏭️/u);
+  assert.match(row, /при просмотре preview/u);
 });
 
 test('урок 11: техническая подготовка перед рендером не называется «пакетом»', () => {
