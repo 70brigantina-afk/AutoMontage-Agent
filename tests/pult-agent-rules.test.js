@@ -72,7 +72,7 @@ test('AGENTS.md offers cleanup of the finished reel in the pult section and the 
   assert.match(pult, CLEAN_OFFER);
   assert.match(pult, /ГБ и список файлов/u);
   assert.match(pult, /[Нн]икогда не удаляй[\s\S]{0,40}без «да»/u);
-  const autonomy = text.split('## Обязательный выбор монтажа в новом чате')[1].split('\n## ')[0];
+  const autonomy = text.split('## Обязательная карточка «Что делаем?» в новом чате')[1].split('\n## ')[0];
   assert.match(autonomy, CLEAN_OFFER);
 });
 
