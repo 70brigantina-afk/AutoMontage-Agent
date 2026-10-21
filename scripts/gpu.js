@@ -24,4 +24,18 @@ function layerGpuPlan({ env = process.env, platform = process.platform, arch = p
   return { gl: null, reason: 'ускорение на этой платформе не проверено (#93)' };
 }
 
-module.exports = { GPU_ENV, LAYER_OFFTHREAD_CACHE_BYTES, gpuMode, layerGpuPlan };
+// Строка для doctor: какой режим выберет layer render и почему. Не бросает.
+// Живую пробу браузера не делаем: `remotion gpu` в Remotion 4.0.536 падает
+// на chrome://gpu (net::ERR_FAILED), поэтому судим по платформе и env.
+function describeLayerGpu({ env = process.env, platform = process.platform, arch = process.arch } = {}) {
+  let plan;
+  try {
+    plan = layerGpuPlan({ env, platform, arch });
+  } catch (err) {
+    return { level: 'warn', message: `Рендер слоя: ${err.message}; будет использован режим auto` };
+  }
+  if (plan.gl) return { level: 'ok', message: `Рендер слоя: GPU (${plan.gl}) – ${plan.reason}` };
+  return { level: 'ok', message: `Рендер слоя: CPU – ${plan.reason}` };
+}
+
+module.exports = { GPU_ENV, LAYER_OFFTHREAD_CACHE_BYTES, gpuMode, layerGpuPlan, describeLayerGpu };
