@@ -10,7 +10,7 @@ const { configureMediaToolPath } = require('../env');
 const { acquireHeavySlot } = require('../heavy-queue');
 const { openReadOnlyFlags } = require('../filesystem-capabilities');
 const { probeVideo } = require('../media-probe');
-const { VIDEO_MAX_BYTES, createImportController, importReviewMedia } = require('../review/media-import');
+const { LAYER_IMPORT_LIMITS, createImportController, importReviewMedia } = require('../review/media-import');
 const { runMediaProcess } = require('../review/media-process');
 const { projectFrom, relative } = require('./common');
 const { appendRegistry, assertReportSource, findByRender, findRenderReport, layerAsset, renderReportProblem } = require('./registry');
@@ -19,12 +19,16 @@ const FLAGS = { 'project-dir': 'value', file: 'value' };
 const HINT = 'motion-vNN/renders/layer-NN.mp4';
 const HASH_CHUNK_BYTES = 1024 * 1024;
 
+// Слой урока длиннее и тяжелее обычного видео Review: свои лимиты импорта (до 4 ГБ и до 2 часов).
+const LAYER_MAX_GB = LAYER_IMPORT_LIMITS.videoMaxBytes / 1024 ** 3;
+const LAYER_MAX_HOURS = LAYER_IMPORT_LIMITS.videoMaxSeconds / 3600;
+
 // Коды importReviewMedia остаются в сообщении, частые получают подсказку, что делать.
 const IMPORT_HINTS = {
   MEDIA_IMPORT_BUSY: 'идёт другой импорт или правка этого проекта – повторите позже',
-  MEDIA_IMPORT_TOO_LARGE: `файл слоя больше ${VIDEO_MAX_BYTES / 1024 ** 3} ГБ – сократите слой или понизьте качество рендера`,
+  MEDIA_IMPORT_TOO_LARGE: `файл слоя больше ${LAYER_MAX_GB} ГБ – сократите слой или понизьте качество рендера`,
   MEDIA_IMPORT_DISK_FULL: 'на диске не хватает места для импорта – освободите место и повторите',
-  MEDIA_IMPORT_DURATION_UNSUPPORTED: 'слой длиннее 30 минут – такой импорт не поддерживается, сократите слой',
+  MEDIA_IMPORT_DURATION_UNSUPPORTED: `слой длиннее ${LAYER_MAX_HOURS} часов – такой импорт не поддерживается, сократите слой`,
 };
 
 function importFailure(error) {
@@ -126,6 +130,7 @@ async function importLayerFile({ projectDir, sourcePath, file, opened, fileSyste
         controller: createImportController(),
         runMediaProcessImpl,
         masterStrategy: 'remux-if-conforming',
+        limits: LAYER_IMPORT_LIMITS,
         log,
       });
     } catch (error) {

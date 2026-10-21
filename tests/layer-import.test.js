@@ -11,7 +11,9 @@ const { sha256File, writeJson } = require('../scripts/layer/common');
 const { hashBytes } = require('../scripts/pult/files');
 const { buildReport, gate } = require('../scripts/qa/report');
 const { inspectImportedAssetBundle } = require('../scripts/review/imported-assets');
-const { mediaImportError } = require('../scripts/review/media-import');
+const {
+  LAYER_IMPORT_LIMITS, VIDEO_MAX_BYTES, importReviewMedia, mediaImportError, parseImportHeaders,
+} = require('../scripts/review/media-import');
 const { runMediaProcess } = require('../scripts/review/media-process');
 const {
   appendRegistry, findByCanonical, findByReference, findByRender, findRenderReport, readRegistry, renderPassed,
@@ -355,9 +357,9 @@ test('import errors keep their code and get a Russian hint', { skip: !hasFfmpeg 
   const p = layerProject(t);
   const cases = {
     MEDIA_IMPORT_BUSY: /идёт другой импорт/,
-    MEDIA_IMPORT_TOO_LARGE: /больше 1 ГБ – сократите слой или понизьте качество/,
+    MEDIA_IMPORT_TOO_LARGE: /больше 4 ГБ – сократите слой или понизьте качество/,
     MEDIA_IMPORT_DISK_FULL: /не хватает места/,
-    MEDIA_IMPORT_DURATION_UNSUPPORTED: /длиннее 30 минут/,
+    MEDIA_IMPORT_DURATION_UNSUPPORTED: /длиннее 2 часов/,
     MEDIA_IMPORT_DECODE_FAILED: /импорт не удался/,
   };
   for (const [code, hint] of Object.entries(cases)) {
@@ -365,6 +367,25 @@ test('import errors keep their code and get a Russian hint', { skip: !hasFfmpeg 
     await assert.rejects(p.run(p.file, { ...quiet, importImpl }), (error) => hint.test(error.message) && error.message.includes(`(${code})`));
   }
   nothingImported(p.projectDir);
+});
+
+test('regression: layer import passes the layer limits, so a 1.43 GiB, 42-minute lesson layer is not refused', { skip: !hasFfmpeg }, async (t) => {
+  const p = layerProject(t);
+  const seen = [];
+  const importImpl = async (options) => {
+    seen.push(options.limits);
+    // Слой урока 42:07 весом 1,43 ГиБ: по лимитам Review – отказ, по лимитам слоя – проходит.
+    const lessonHeaders = { ...options.headers, 'content-length': '1535000000' };
+    assert.throws(() => parseImportHeaders(lessonHeaders), (error) => error.code === 'MEDIA_IMPORT_TOO_LARGE');
+    assert.equal(parseImportHeaders(lessonHeaders, options.limits).contentLength, 1_535_000_000);
+    return importReviewMedia(options);
+  };
+  await p.run(p.file, { ...quiet, importImpl });
+  assert.deepEqual(seen, [LAYER_IMPORT_LIMITS]);
+  assert.deepEqual(LAYER_IMPORT_LIMITS, { videoMaxBytes: 4 * 1024 ** 3, videoMaxSeconds: 7200 });
+  assert.ok(LAYER_IMPORT_LIMITS.videoMaxBytes > VIDEO_MAX_BYTES);
+  const [entry] = readRegistry(p.projectDir).imports;
+  assert.ok(bundleOf(p.projectDir, entry.reference));
 });
 
 test('the checked descriptor itself is hashed and streamed from the start', { skip: !hasFfmpeg }, async (t) => {
