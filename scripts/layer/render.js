@@ -1,6 +1,8 @@
 // automontage layer render – рендер слоя kit и гейты по готовому файлу: layer check (план, секунды) →
 // слот очереди тяжёлых задач → Remotion защищённой командой → нормализация ffmpeg → G6 (длина и размер
 // к исходнику) и G7 (голос в звуке слоя) → qa/layer-<слой>-render-NN.{json,txt}.
+// На Apple Silicon Remotion идёт с --gl=angle (GPU, AUTOMONTAGE_GPU=off отключает), в любом режиме кэш видео
+// 2 ГиБ; упавший GPU-рендер один раз повторяется на CPU тем же raw и env (DECISIONS.md D-052, #93).
 // Код: 0 – пройдено или только предупреждения, 1 – стоп (в том числе стоп layer check), 2 – оценить нельзя.
 //
 // --public-dir не копируется в каждый рендер: Remotion 4.0.536 для рендера из CLI собирает временный
@@ -15,6 +17,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { ROOT, resolveRemotionCommand } = require('../env');
 const { remotionLayerRenderCommand } = require('../build-commands');
+const { layerGpuPlan, LAYER_OFFTHREAD_CACHE_BYTES } = require('../gpu');
 const { probeMediaPath, probeVideo } = require('../media-probe');
 const { hashBytes } = require('../pult/files');
 const { runTool, captureTool } = require('../process');
@@ -106,12 +109,14 @@ function normalizeAudioArgs(raw, out, samples) {
 }
 
 // deps: log/warn – вывод; runToolImpl – запуск Remotion и ffmpeg (подмена рендера в тестах); checkImpl –
-// layer check; acquireSlot – занятие слота общей очереди (контракт acquireHeavySlot).
+// layer check; acquireSlot – занятие слота общей очереди (контракт acquireHeavySlot); gpuPlan – план GPU без
+// аргументов (layerGpuPlan), бросает при неверном AUTOMONTAGE_GPU.
 async function run(options, deps = {}) {
   const log = deps.log || console.log;
   const warn = deps.warn || console.error;
   const runToolImpl = deps.runToolImpl || runTool;
   const checkImpl = deps.checkImpl || check.run;
+  const gpuPlan = deps.gpuPlan || (() => layerGpuPlan());
   const { projectDir, layerDir, layerName, sourcePath } = resolveLayer(options);
 
   const checkOptions = { 'project-dir': projectDir, layer: layerName, ...(options.profile ? { profile: options.profile } : {}) };
@@ -122,6 +127,9 @@ async function run(options, deps = {}) {
   };
   let code = await runCheck();
   if (code !== 0) return code;
+  // Неверный AUTOMONTAGE_GPU – отказ до слота очереди.
+  const plan = gpuPlan();
+  log(plan.gl ? `GPU рендера: ${plan.gl} – ${plan.reason}` : `GPU рендера: нет – ${plan.reason}`);
   const config = heavyQueueConfig();
   if (options['no-wait']) config.waitMs = 0;
   const slot = await (deps.acquireSlot || acquireHeavySlot)({
@@ -150,10 +158,13 @@ async function run(options, deps = {}) {
     // Заявка снимается только после записи отчёта: иначе после сбоя без готового слоя второй рендер успел
     // бы занять этот номер до записи отчёта и потом перезаписать его.
     try {
+      const build = (gl) => remotionLayerRenderCommand(remotion, {
+        entry: path.join(layerDir, 'src', 'index.jsx'), composition: layer.composition, output: claim.raw, publicDir: path.join(layerDir, 'public'),
+        gl, offthreadCacheBytes: LAYER_OFFTHREAD_CACHE_BYTES,
+      });
       return renderClaimed({ projectDir, layerName, sourcePath, profile, profileName, held, claim, samples,
-        reportName: reportName(claim.n), command: remotionLayerRenderCommand(remotion, {
-          entry: path.join(layerDir, 'src', 'index.jsx'), composition: layer.composition, output: claim.raw, publicDir: path.join(layerDir, 'public'),
-        }), runToolImpl, log, warn });
+        reportName: reportName(claim.n), command: build(plan.gl), fallbackCommand: plan.gl ? build(null) : null,
+        runToolImpl, log, warn });
     } finally {
       claim.release();
     }
@@ -163,14 +174,21 @@ async function run(options, deps = {}) {
 }
 
 // Рендер под уже занятым номером: Remotion → нормализация → G6 и G7 → отчёт. Код выхода по отчёту.
-function renderClaimed({ projectDir, layerName, sourcePath, profile, profileName, held, claim, samples, reportName, command, runToolImpl, log, warn }) {
+function renderClaimed({ projectDir, layerName, sourcePath, profile, profileName, held, claim, samples, reportName, command, fallbackCommand, runToolImpl, log, warn }) {
   // С запуска Remotion любой отказ (сам рендер, нормализация, probe, декодирование, гейт, испорченный
   // манифест) – отчёт с error и код 2, а не «layer render отменён» без отчёта.
   let gates = [];
   let error = null;
   try {
-    runToolImpl(command.command, command.args, { cwd: ROOT, stage: 'layer Remotion render',
-      env: { ...process.env, [LIMITED_RANGE_ENV]: '1' } });
+    const env = { ...process.env, [LIMITED_RANGE_ENV]: '1' };
+    try {
+      runToolImpl(command.command, command.args, { cwd: ROOT, stage: 'layer Remotion render', env });
+    } catch (caught) {
+      if (!fallbackCommand) throw caught;
+      // Один повтор на CPU в тот же raw; сбой повтора уходит в общий catch (отчёт с error).
+      warn(`Remotion с GPU упал (${caught?.message ?? caught}) – повторяю на CPU`);
+      runToolImpl(fallbackCommand.command, fallbackCommand.args, { cwd: ROOT, stage: 'layer Remotion render (CPU)', env });
+    }
     const rawProbe = JSON.parse(captureTool('ffprobe', ['-v', 'error', '-select_streams', 'v:0',
       '-show_entries', 'stream=pix_fmt,color_range', '-of', 'json', claim.raw],
     { cwd: ROOT, stage: 'layer raw probe', maxBuffer: 64 * 1024 }));
