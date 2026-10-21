@@ -44,4 +44,6 @@ test('describeLayerGpu: неверное значение не бросает, �
   const bad = describeLayerGpu({ env: { AUTOMONTAGE_GPU: 'gpu' }, platform: 'darwin', arch: 'arm64' });
   assert.equal(bad.level, 'warn');
   assert.match(bad.message, /auto\|off/);
+  assert.doesNotMatch(bad.message, /будет использован/);
+  assert.match(bad.message, /не запустится/);
 });
