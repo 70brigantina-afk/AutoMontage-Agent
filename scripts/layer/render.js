@@ -182,9 +182,14 @@ function renderClaimed({ projectDir, layerName, sourcePath, profile, profileName
   try {
     const env = { ...process.env, [LIMITED_RANGE_ENV]: '1' };
     try {
-      runToolImpl(command.command, command.args, { cwd: ROOT, stage: 'layer Remotion render', env });
+      // У GPU-попытки, за которой идёт повтор, после сбоя добиваются detached-группы Chrome,
+      // иначе осиротевший GPU-Chrome конкурирует с повтором на CPU.
+      runToolImpl(command.command, command.args, { cwd: ROOT, stage: 'layer Remotion render', env, ...(fallbackCommand ? { reapOnFailure: true } : {}) });
     } catch (caught) {
       if (!fallbackCommand) throw caught;
+      // Намеренная остановка (Ctrl+C, kill, закрытие терминала) – не сбой GPU: повтор на CPU ей противоречил бы.
+      // SIGKILL (OOM-killer) и прочие падения повторяются.
+      if (['SIGINT', 'SIGTERM', 'SIGHUP'].includes(caught?.signal)) throw caught;
       // Один повтор на CPU в тот же raw; сбой повтора уходит в общий catch (отчёт с error).
       warn(`Remotion с GPU упал (${caught?.message ?? caught}) – повторяю на CPU`);
       runToolImpl(fallbackCommand.command, fallbackCommand.args, { cwd: ROOT, stage: 'layer Remotion render (CPU)', env });
