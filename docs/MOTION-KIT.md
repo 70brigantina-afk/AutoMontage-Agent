@@ -130,6 +130,10 @@ automontage layer sheet --project-dir projects/<ролик>
 4. **`layer render`** сначала сам повторяет `layer check`, ждёт слот общей очереди, рендерит
    слой Remotion, нормализует видео и звук и проверяет G6 и G7. Готовый файл –
    `motion-v01/renders/layer-01.mp4`, отчёт – `qa/layer-motion-v01-render-01.txt`.
+   На Apple Silicon Remotion рисует кадры через GPU (`--gl=angle`): слой 24:39 – около 30 минут
+   вместо примерно 60, кадры совпадают с CPU (SSIM не ниже 0,99). `AUTOMONTAGE_GPU=off` возвращает
+   CPU; на других платформах CPU и так. Если GPU-рендер упал, команда один раз повторяет его на CPU
+   и печатает предупреждение. Режим показывает `npm run doctor` (строка «Рендер слоя»).
 5. **`layer import`** принимает только проверенный рендер и кладёт его в ассеты проекта
    (`assets/broll/video/<id>/media.mp4`) тем же путём, что импорт в Review. Запись о слое
    попадает в реестр `qa/layer-imports.json` – по нему preview узнаёт слой kit.
