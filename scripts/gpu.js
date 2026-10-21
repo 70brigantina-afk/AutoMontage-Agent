@@ -32,7 +32,7 @@ function describeLayerGpu({ env = process.env, platform = process.platform, arch
   try {
     plan = layerGpuPlan({ env, platform, arch });
   } catch (err) {
-    return { level: 'warn', message: `Рендер слоя: ${err.message}; будет использован режим auto` };
+    return { level: 'warn', message: `Рендер слоя: ${err.message}; layer render не запустится – исправь значение (auto|off) или убери переменную` };
   }
   if (plan.gl) return { level: 'ok', message: `Рендер слоя: GPU (${plan.gl}) – ${plan.reason}` };
   return { level: 'ok', message: `Рендер слоя: CPU – ${plan.reason}` };
