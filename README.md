@@ -694,6 +694,15 @@ automontage layer sheet --project-dir projects/<ролик>               # ко
 (по умолчанию `projects/.library/sfx`, см. [`.env.example`](.env.example)); без неё слой
 собирается без эффектов, и `layer new` об этом предупреждает. Подробно: [`docs/MOTION-KIT.md`](docs/MOTION-KIT.md).
 
+На Apple Silicon (macOS, arm64) `layer render` рисует кадры слоя через GPU (`--gl=angle`): на
+реальном 24-минутном слое около 30 минут вместо примерно 60, а кадры совпадают с CPU-рендером
+(SSIM не ниже 0,99). Включено само (`AUTOMONTAGE_GPU=auto`); на остальных платформах рендер идёт на
+CPU. `AUTOMONTAGE_GPU=off` в окружении команды возвращает CPU, например
+`AUTOMONTAGE_GPU=off automontage layer render …`. Если GPU-рендер упал, движок
+печатает одно предупреждение и один раз повторяет рендер на CPU. Какой режим выбран, показывает
+`npm run doctor` в строке «Рендер слоя». Значение кроме `auto` и `off` – ошибка, `layer render`
+останавливается до очереди.
+
 ### Очередь тяжёлых задач
 
 `layer render`, `layer import`, preview, final (lesson и Dynamic), `master` и `roughcut` занимают

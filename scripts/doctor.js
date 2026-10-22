@@ -4,7 +4,7 @@
 //
 //   node scripts/doctor.js        (или: automontage doctor)
 //
-// Проверяет: Node, Python 3, ffmpeg/ffprobe, faster-whisper вместе с PyAV, шрифты, node_modules,
+// Проверяет: Node, Python 3, ffmpeg/ffprobe, faster-whisper вместе с PyAV, шрифты, node_modules, режим GPU рендера слоя,
 // Chromium (нужен только для пересборки картинок-плашек, поэтому WARN, не FAIL).
 const fs = require('fs');
 const path = require('path');
@@ -15,6 +15,7 @@ const {
   ffmpegEncoderAvailable,
   python,
 } = require('./env');
+const { describeLayerGpu } = require('./gpu');
 const { WHISPER_PROBE_PY, evaluateWhisperProbe } = require('./whisper-check');
 
 let fails = 0, warns = 0;
@@ -91,11 +92,18 @@ try {
 if (fs.existsSync(path.join(ROOT, 'node_modules', 'remotion'))) ok('node_modules установлены (Remotion на месте)');
 else fail('node_modules нет. Запусти `npm install` в папке движка');
 
-// 6. Шрифты (инлайн base64, рендер работает из коробки)
+// 6. Режим GPU для layer render (D-052): по платформе и AUTOMONTAGE_GPU, без пробы браузера
+// (`remotion gpu` в Remotion 4.0.536 падает на chrome://gpu, net::ERR_FAILED)
+{
+  const gpu = describeLayerGpu();
+  if (gpu.level === 'ok') ok(gpu.message); else warn(gpu.message);
+}
+
+// 7. Шрифты (инлайн base64, рендер работает из коробки)
 if (fs.existsSync(path.join(ROOT, 'src', 'fonts-data.js'))) ok('шрифты встроены (src/fonts-data.js), качать вручную не нужно');
 else warn('src/fonts-data.js отсутствует: рендер может использовать системные шрифты');
 
-// 7. Chromium (нужен только для пересборки картинок-плашек через Playwright)
+// 8. Chromium (нужен только для пересборки картинок-плашек через Playwright)
 const hasChromium = tryRun('chromium', ['--version']) || tryRun('chromium-browser', ['--version'])
   || tryRun('google-chrome', ['--version']);
 if (hasChromium) ok(`Chromium (${hasChromium}), для пересборки картинок-плашек`);

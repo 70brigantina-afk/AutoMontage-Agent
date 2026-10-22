@@ -1134,6 +1134,16 @@ Pexels подменён. `tests/qa-preview.test.js` в той же маске �
 AUTOMONTAGE_TEST_MOTION_RENDER=1 node --test tests/motion-kit-render.test.js tests/layer-render-still.test.js tests/qa-text-boxes.test.js tests/qa-moment-stills.test.js
 ```
 
+GPU-рендер слоя на Apple Silicon сверяется с CPU отдельным opt-in тестом (только Mac с Apple
+Silicon, около 20 с):
+
+```bash
+AUTOMONTAGE_TEST_MOTION_RENDER=1 node --test tests/layer-gpu-equivalence.test.js
+```
+
+Он рендерит 50 кадров слоя с `--gl=angle` и на CPU и требует SSIM каждого кадра не ниже 0,99
+(на M1 Pro проходит за 17 с). На других платформах тест пропускается.
+
 `motion-kit-render.test.js` проверяет, что кегль субтитров одинаков на каждом кадре и текст не
 обрезается, а `FontLoader` рядом с субтитрами, а не вокруг слоя, роняет рендер.
 `layer-render-still.test.js` снимает кадры 15, 40, 90 и 160 шаблона и требует на них ожидаемые
