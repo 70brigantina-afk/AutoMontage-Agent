@@ -481,3 +481,114 @@ test('--no-wait does not wait in the queue and the label only contains the proje
   assert.equal(acquired, 1);
   assert.equal(renders, 0);
 });
+
+// GPU (#93, D-052): план GPU попадает в команду Remotion вместе с лимитом кэша 2 ГиБ; при падении Remotion с
+// --gl=angle рендер один раз повторяется на CPU с тем же raw, cwd и env.
+const GPU_PLAN = () => ({ gl: 'angle', reason: 'Apple Silicon: тест' });
+const CPU_PLAN = () => ({ gl: null, reason: 'тест' });
+// Обёртка над фейком: на команде с --gl=angle бросает, все вызовы Remotion (cwd, env, args) копит в seen.
+function gpuFailing(fake, { failCpu = false, signal = null } = {}) {
+  const seen = [];
+  const runToolImpl = (command, args, options) => {
+    if (options.stage?.startsWith('layer Remotion render')) {
+      seen.push({ args, cwd: options.cwd, env: options.env, stage: options.stage, options });
+      if (args.includes('--gl=angle') || failCpu) {
+        // Ошибка той же формы, что у assertProcessResult: сигнал лежит в error.signal.
+        const error = new Error(signal ? `layer Remotion render: node завершён сигналом ${signal}` : 'layer Remotion render: node завершился со status 1');
+        error.status = signal ? null : 1;
+        error.signal = signal;
+        throw error;
+      }
+    }
+    // Фейк узнаёт Remotion по stage без пометки (CPU).
+    return fake.runToolImpl(command, args, { ...options, stage: options.stage?.replace(' (CPU)', '') });
+  };
+  return { seen, runToolImpl };
+}
+
+test('layer render: GPU-план → --gl=angle и кэш 2 ГиБ в команде Remotion, лог называет причину', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir, logs, run } = await scaffold(t);
+  const fake = fakeRemotion(6, () => effectsOf(projectDir, 6));
+  assert.equal(await run({ runToolImpl: fake.runToolImpl, gpuPlan: GPU_PLAN }), 0);
+  assert.equal(fake.calls.length, 1);
+  assert.ok(fake.calls[0].includes('--gl=angle'));
+  assert.ok(fake.calls[0].includes('--offthreadvideo-cache-size-in-bytes=2147483648'));
+  assert.ok(logs.includes('GPU рендера: angle – Apple Silicon: тест'), logs.join('\n'));
+});
+
+test('layer render: план CPU → без --gl, но с кэшем 2 ГиБ', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir, logs, run } = await scaffold(t);
+  const fake = fakeRemotion(6, () => effectsOf(projectDir, 6));
+  assert.equal(await run({ runToolImpl: fake.runToolImpl, gpuPlan: CPU_PLAN }), 0);
+  assert.ok(!fake.calls[0].some((a) => String(a).startsWith('--gl')));
+  assert.ok(fake.calls[0].includes('--offthreadvideo-cache-size-in-bytes=2147483648'));
+  assert.ok(logs.includes('GPU рендера: нет – тест'), logs.join('\n'));
+});
+
+test('layer render: GPU упал → один повтор на CPU, тот же raw, отчёт обычный', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir, logs, run, report } = await scaffold(t);
+  const fake = fakeRemotion(6, () => effectsOf(projectDir, 6));
+  const wrapped = gpuFailing(fake);
+  assert.equal(await run({ runToolImpl: wrapped.runToolImpl, gpuPlan: GPU_PLAN }), 0);
+  assert.equal(wrapped.seen.length, 2);
+  assert.ok(wrapped.seen[0].args.includes('--gl=angle'));
+  assert.ok(!wrapped.seen[1].args.includes('--gl=angle'));
+  assert.equal(wrapped.seen[1].stage, 'layer Remotion render (CPU)');
+  assert.equal(wrapped.seen[0].env.AUTOMONTAGE_LAYER_LIMITED_RANGE, '1');
+  assert.equal(wrapped.seen[1].env.AUTOMONTAGE_LAYER_LIMITED_RANGE, '1');
+  assert.equal(wrapped.seen[0].cwd, wrapped.seen[1].cwd);
+  assert.equal(wrapped.seen[0].args[wrapped.seen[0].args.indexOf('render') + 3], wrapped.seen[1].args[wrapped.seen[1].args.indexOf('render') + 3]);
+  assert.equal(logs.filter((line) => line.includes('повторяю на CPU')).length, 1, logs.join('\n'));
+  assert.equal(report().error, null);
+});
+
+test('layer render: GPU и CPU упали → две попытки, отчёт с error, код 2, заявка снята', { skip: !hasFfmpeg }, async (t) => {
+  const { layerDir, run, report } = await scaffold(t);
+  const wrapped = gpuFailing(fakeRemotion(6, null), { failCpu: true });
+  assert.equal(await run({ runToolImpl: wrapped.runToolImpl, gpuPlan: GPU_PLAN }), 2);
+  assert.equal(wrapped.seen.length, 2);
+  assert.match(report().error, /Remotion render/);
+  assert.deepEqual(fs.readdirSync(path.join(layerDir, 'renders')), []);
+});
+
+test('layer render: GPU убит SIGTERM → без CPU-повтора, отчёт с error, код 2', { skip: !hasFfmpeg }, async (t) => {
+  const { logs, run, report } = await scaffold(t);
+  const wrapped = gpuFailing(fakeRemotion(6, null), { signal: 'SIGTERM' });
+  assert.equal(await run({ runToolImpl: wrapped.runToolImpl, gpuPlan: GPU_PLAN }), 2);
+  assert.equal(wrapped.seen.length, 1);
+  assert.ok(!logs.some((line) => line.includes('повторяю на CPU')), logs.join('\n'));
+  assert.match(report().error, /SIGTERM/);
+});
+
+test('layer render: GPU убит SIGKILL (OOM) → повтор на CPU', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir, run } = await scaffold(t);
+  const wrapped = gpuFailing(fakeRemotion(6, () => effectsOf(projectDir, 6)), { signal: 'SIGKILL' });
+  assert.equal(await run({ runToolImpl: wrapped.runToolImpl, gpuPlan: GPU_PLAN }), 0);
+  assert.equal(wrapped.seen.length, 2);
+});
+
+test('layer render: GPU-попытка добивает Chrome при неудаче (reapOnFailure), CPU-попытка и CPU-план – нет', { skip: !hasFfmpeg }, async (t) => {
+  const first = await scaffold(t);
+  const wrapped = gpuFailing(fakeRemotion(6, () => effectsOf(first.projectDir, 6)));
+  assert.equal(await first.run({ runToolImpl: wrapped.runToolImpl, gpuPlan: GPU_PLAN }), 0);
+  assert.equal(wrapped.seen[0].options.reapOnFailure, true);
+  assert.equal(wrapped.seen[1].options.reapOnFailure, undefined);
+});
+
+test('layer render: план CPU → единственная попытка без reapOnFailure', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir, run } = await scaffold(t);
+  const wrapped = gpuFailing(fakeRemotion(6, () => effectsOf(projectDir, 6)));
+  assert.equal(await run({ runToolImpl: wrapped.runToolImpl, gpuPlan: CPU_PLAN }), 0);
+  assert.equal(wrapped.seen.length, 1);
+  assert.equal(wrapped.seen[0].options.reapOnFailure, undefined);
+});
+
+test('layer render: AUTOMONTAGE_GPU=gpu → отказ до слота очереди', { skip: !hasFfmpeg }, async (t) => {
+  const { run } = await scaffold(t);
+  let acquired = 0;
+  await assert.rejects(run({
+    gpuPlan() { throw new Error('AUTOMONTAGE_GPU: допустимо auto|off'); },
+    acquireSlot: async () => { acquired += 1; return { index: 0, waited: false, release() {} }; },
+  }), /AUTOMONTAGE_GPU/);
+  assert.equal(acquired, 0);
+});

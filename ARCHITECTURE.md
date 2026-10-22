@@ -1053,7 +1053,13 @@ flowchart TD
   сырой рендер. Номер с готовым файлом или отчётом не переиспользуется. Remotion запускается
   командой `remotionLayerRenderCommand` (`scripts/build-commands.js`) поверх
   `resolveRemotionCommand` (`scripts/env.js`): пустой защищённый `--env-file`, `--public-dir`
-  слоя, без `--props`, `cwd` – корень движка. Только `layer render` передаёт
+  слоя, без `--props`, `cwd` – корень движка. Режим GPU выбирает `scripts/gpu.js`
+  (`AUTOMONTAGE_GPU=auto|off`, пусто = `auto`; неверное значение останавливает команду до слота
+  очереди): `auto` добавляет `--gl=angle` только на `darwin`/`arm64`, иначе CPU. Каждый layer
+  render передаёт `--offthreadvideo-cache-size-in-bytes=2147483648` (2 ГиБ). Если Remotion с
+  `--gl=angle` упал, печатается одно предупреждение и рендер один раз повторяется на CPU в ту же
+  заявку `renders/layer-NN.raw.mp4`; сбой CPU-рендера – прежний отчёт с ошибкой и код 2. Формат
+  отчёта `qa/layer-*-render-NN.json` не меняется (D-052). Только `layer render` передаёт
   `AUTOMONTAGE_LAYER_LIMITED_RANGE=1` вместе с остальным окружением: override
   `scripts/remotion-ffmpeg-override.js` добавляет limited range/yuv420p в кодирование libx264
   самого Remotion. Затем ffprobe проверяет `pix_fmt=yuv420p` и `color_range=tv`: ffmpeg копирует
