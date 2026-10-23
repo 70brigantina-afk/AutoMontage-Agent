@@ -44,7 +44,7 @@ export default function buildPlan({ words, face, fps, width, height, durationInF
     hook: 'speaker',
     camera: {
       face,
-      shots: autoShots(words, { endSec: duration }),
+      shots: autoShots(words, { endSec: duration, aspect: width > height ? 'horizontal' : 'vertical' }),
       punches: [],
       blurs: [{ from: shotAt, to: shotUntil - 0.2, px: 20 }],
     },

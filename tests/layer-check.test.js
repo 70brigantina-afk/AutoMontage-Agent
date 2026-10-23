@@ -60,7 +60,7 @@ test('the fresh template passes every stop gate and writes manifest and report',
   assert.equal(json.summary.fail, 0);
   // Нейтральный шаблон проходит: в худшем случае предупреждения, стопов нет.
   assert.ok(['pass', 'warn'].includes(json.summary.status), json.summary.status);
-  assert.deepEqual(json.gates.map((g) => g.id), ['G1', 'G2', 'G3', 'G4', 'G5', 'G9', 'G10', 'G11', 'G16']);
+  assert.deepEqual(json.gates.map((g) => g.id), ['G1', 'G2', 'G3', 'G4', 'G5', 'G9', 'G10', 'G11', 'G16', 'G17']);
   assert.deepEqual(json.unusedWaivers, []);
   // Отчёт привязан к своему манифесту: путь от папки проекта и sha256 записанного файла.
   assert.deepEqual(json.inputs, [{ role: 'manifest', path: 'motion-v01/out/manifest.json', sha256: hashFile(manifestFile) }]);

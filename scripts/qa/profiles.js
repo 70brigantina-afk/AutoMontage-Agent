@@ -15,6 +15,10 @@ function deepFreeze(value) {
 
 const BASE = deepFreeze({
   rhythm: { stopSec: 2.5, warnSec: 2.2 },
+  // Горизонталь (кадр шире высоты) – длинный ролик: лицо не мелькает, ритм держит графика. G1 здесь
+  // только ловит долгий «голый» спикер, а G17 запрещает частую смену крупности и позиции лица.
+  rhythmHorizontal: { stopSec: 90, warnSec: 30 },
+  calmCamera: { minSec: 6, warnSec: 8 },
   camera: { jumpScale: 0.15, shiftPx: 85, weakShiftPx: 40, punchScale: 0.1, weakScale: 0.06, sharpBlurPx: 6, eatenPunch: 1.05 },
   scale: { max: 1.25 },
   // sec/mustSec – задокументированное правило автора (docs/BATCH-REELS-WORKFLOW.md, docs/editing-rules.md):
@@ -53,7 +57,7 @@ const PROFILES = deepFreeze({
   live: { ...BASE, voiceMusic: { stopLow: 3, warnLow: 12, target: 15, warnHigh: 18, stopHigh: 24, calibrated: false } },
 });
 
-const WAIVABLE = Object.freeze(['G1', 'G4', 'G11']);
+const WAIVABLE = Object.freeze(['G1', 'G4', 'G11', 'G17']);
 
 function getProfile(name = 'avatar') {
   if (!Object.hasOwn(PROFILES, name)) throw new Error(`неизвестный профиль проверок «${name}»: используй avatar или live`);

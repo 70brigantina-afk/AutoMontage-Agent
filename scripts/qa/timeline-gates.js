@@ -193,13 +193,15 @@ function speakerPlans(camera, detected, fps) {
 }
 
 const frameScale = (manifest) => Math.min(manifest.width, manifest.height) / 1080;
+const isHorizontal = (manifest) => manifest.width > manifest.height;
 
 function gateRhythm(manifest, profile) {
   assertCameraArrays(manifest);
   const { fps } = manifest;
   const scale = frameScale(manifest);
   const plans = speakerPlans(manifest.camera, detectCameraEvents(manifest.camera, profile.camera, scale, manifest.fps), fps);
-  const { stopSec, warnSec } = profile.rhythm;
+  const horizontal = isHorizontal(manifest);
+  const { stopSec, warnSec } = horizontal ? profile.rhythmHorizontal : profile.rhythm;
   // Спикер ни разу не был резким и видимым за весь ролик – ритм оценивать не по чему: это не
   // «идеальные 0 секунд», а сигнал «гейт не увидел спикера вообще».
   if (!plans.length) {
@@ -216,7 +218,37 @@ function gateRhythm(manifest, profile) {
     status, value: r2(longest), unit: 'с', threshold: `≤ ${fmt(stopSec)} с`,
     spans: plans.filter((p) => p.sec > warnSec + 1e-9).sort((a, b) => b.sec - a.sec).slice(0, 5)
       .map((p) => span(p.from, p.to, fps, `план ${fmt(p.sec)} с без события`)),
-    hint: `разбейте план: джамп-кат (≥ ${jumpPct} % масштаба или сдвиг лица ≥ ${shiftPx} px), панч-ин на общем плане, размытие под графикой или уход под вставку`,
+    hint: horizontal
+      ? 'горизонталь: добавьте графику – плашку, врезку или вставку под размытием; камеру чаще не меняйте (G17)'
+      : `разбейте план: джамп-кат (≥ ${jumpPct} % масштаба или сдвиг лица ≥ ${shiftPx} px), панч-ин на общем плане, размытие под графикой или уход под вставку`,
+  });
+}
+
+// G17 – только горизонталь: лицо не мелькает. Смена крупности или позиции спикера (рез, панч) на
+// видимом спикере допустима не раньше чем через minSec после прошлой смены или после того, как
+// спикер появился из-под вставки. Графику, размытие и вставки G17 не ограничивает.
+function gateCalmCamera(manifest, profile) {
+  assertCameraArrays(manifest);
+  const { minSec, warnSec } = profile.calmCamera;
+  if (!isHorizontal(manifest)) {
+    return gate('G17', 'Спокойная камера', { status: 'skipped', threshold: `≥ ${fmt(minSec)} с`, hint: 'только для горизонтали' });
+  }
+  const { fps } = manifest;
+  const detected = detectCameraEvents(manifest.camera, profile.camera, frameScale(manifest), fps);
+  const changes = new Set(detected.events.filter((e) => e.kind === 'cut' || e.kind === 'punch').map((e) => e.frame));
+  // Смена в первые кадры после выхода из-под графики (≤ 0,25 с) – спикер выходит уже на новом
+  // плане: детектор видит фокус и рез раздельно, но зритель – одно событие.
+  const short = speakerPlans(manifest.camera, detected, fps)
+    .filter((p) => changes.has(p.to) && p.sec < warnSec - 1e-9 && p.sec > 0.25 + 1e-9);
+  const stops = short.filter((p) => p.sec < minSec - 1e-9);
+  const shortest = short.reduce((min, p) => (p.sec < min ? p.sec : min), Infinity);
+  return gate('G17', 'Спокойная камера', {
+    status: stops.length ? 'fail' : short.length ? 'warn' : 'pass',
+    value: short.length, unit: 'шт.', threshold: `план до смены ≥ ${fmt(minSec)} с`,
+    spans: short.sort((a, b) => a.sec - b.sec).slice(0, 5).map((p) => span(p.from, p.to, fps, `смена камеры через ${fmt(p.sec)} с`)),
+    hint: short.length
+      ? `горизонталь: лицо мелькает (самый короткий план ${fmt(shortest)} с) – autoShots(words, { aspect: 'horizontal' }), только W и M, без L/R и панчей чаще раза в ${fmt(warnSec)} с; ритм держите графикой`
+      : '',
   });
 }
 
@@ -699,11 +731,12 @@ function runTimelineGates(manifest, profile) {
     gateStock(manifest, profile),
     gateDonor(manifest, profile),
     gateAnchors(manifest),
+    gateCalmCamera(manifest, profile),
   ];
   return applyWaivers(gates, manifest.waivers || []);
 }
 
 module.exports = {
-  assertCameraArrays, assertCues, assertInserts, detectCameraEvents, gateAnchors, gateDonor, gateHook, gateRhythm,
+  assertCameraArrays, assertCues, assertInserts, detectCameraEvents, gateAnchors, gateCalmCamera, gateDonor, gateHook, gateRhythm,
   gateSafeZone, gateScale, gateSfxDensity, gateStock, gateWeakCuts, runTimelineGates, speakerPlans,
 };
