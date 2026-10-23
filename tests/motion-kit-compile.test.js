@@ -176,7 +176,7 @@ test('compilePlan keeps the original buildPlan error as cause', () => {
 test('compileLayer rejects a malformed waivers entry with the gate list and its index', () => {
   const bad = (waivers) => () => kit.compileLayer({ ...plan, waivers }, cfg);
   assert.throws(bad({ G1: 'x' }), /waivers должен быть массивом/);
-  assert.throws(bad([null]), /waivers\[0\]: исключение возможно только для G1, G4, G11 и только с причиной/);
+  assert.throws(bad([null]), /waivers\[0\]: исключение возможно только для G1, G4, G11, G17 и только с причиной/);
   assert.throws(bad([{ gate: 'G1', reason: 123 }]), /waivers\[0\]/);
   assert.throws(bad([{ gate: 'G5', reason: 'причина' }]), /waivers\[0\]/);
   // Регистр важен: G1 – да, g1 – нет, это не тот же гейт.
