@@ -1882,6 +1882,20 @@ test('horizontal: graphics under blur and inserts do not limit G17 – the speak
   assert.equal(gateCalmCamera(horizontal({ seconds: 21, camera: cutsEvery(7) }), avatar).status, 'warn');
 });
 
+test('autoShots aspect horizontal: visible plan counts from the speaker leaving an insert', () => {
+  const words = [];
+  for (let i = 0; i < 120; i += 1) words.push({ t: i % 7 === 6 ? 'конец.' : 'слово', s: i * 0.5, e: i * 0.5 + 0.4 });
+  const hidden = [{ from: 12, to: 20 }, { from: 33, to: 35.5 }];
+  const shots = kit.autoShots(words, { endSec: 60, aspect: 'horizontal', hidden });
+  const visibleFrom = (t) => Math.max(0, ...hidden.filter((h) => h.to <= t).map((h) => h.to));
+  for (let i = 1; i < shots.length; i += 1) {
+    const { at } = shots[i];
+    if (hidden.some((h) => at > h.from && at < h.to)) continue; // смена под вставкой не видна
+    assert.ok(at - Math.max(shots[i - 1].at, visibleFrom(at)) >= 8 - 1e-9, JSON.stringify(shots));
+  }
+  assert.throws(() => kit.autoShots(words, { endSec: 60, aspect: 'horizontal', hidden: [{ from: 1 }] }), /hidden/);
+});
+
 test('autoShots aspect horizontal: only W/M, every plan ≥ 8 s, cuts on sentence ends', () => {
   const words = [];
   for (let i = 0; i < 120; i += 1) words.push({ t: i % 7 === 6 ? 'конец.' : 'слово', s: i * 0.5, e: i * 0.5 + 0.4 });

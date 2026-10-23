@@ -296,19 +296,27 @@ export function autoShots(words, { endSec, aspect, ...options } = {}) {
 // Спокойная раскадровка горизонтали: план не короче minSec, смена – только на конце предложения
 // (. ! ? …), после maxSec – на любом знаке препинания. Молчание не дробим: пауза на одном плане
 // лучше лишней смены крупности. Сдвигов L/R нет – говорящий не прыгает по горизонтали.
-export function calmShots(words, { endSec, minSec = CALM_SHOTS.minSec, maxSec = CALM_SHOTS.maxSec, cycle = CALM_SHOTS.cycle } = {}) {
+// hidden – окна в секундах ({ from, to }), где спикера не видно: полноэкранные вставки и размытие.
+// Видимый план считается от выхода спикера из-под окна, иначе смена через 0,3 с после вставки
+// мелькает (G17), хотя от прошлой смены прошло больше minSec.
+export function calmShots(words, { endSec, minSec = CALM_SHOTS.minSec, maxSec = CALM_SHOTS.maxSec, cycle = CALM_SHOTS.cycle, hidden = [] } = {}) {
   if (!(minSec > 0) || !(maxSec >= minSec) || !Array.isArray(cycle) || !cycle.length) {
     throw new Error('calmShots: нужны minSec > 0, maxSec ≥ minSec и непустой cycle');
   }
   if (!Array.isArray(words)) throw new Error('calmShots: words должен быть массивом слов транскрипта');
+  if (!Array.isArray(hidden) || hidden.some((h) => !Number.isFinite(h?.from) || !Number.isFinite(h?.to))) {
+    throw new Error('calmShots: hidden – массив окон { from, to } в секундах');
+  }
   const list = words.filter((w) => Number.isFinite(w?.e));
   const end = Number.isFinite(endSec) ? endSec : (list.at(-1)?.e ?? 0);
+  // Последний выход спикера из-под окна не позже t; смена внутри окна не видна – отсчёт не сбивает.
+  const revealedAt = (t) => hidden.reduce((at, h) => (h.to <= t && h.to > at ? h.to : at), 0);
   const shots = [{ at: 0, preset: cycle[0], drift: 'none' }];
   let last = 0;
   for (const word of list) {
     const cut = word.e;
     if (end - cut < minSec) break; // хвост короче minSec не отрезаем
-    const since = cut - last;
+    const since = cut - Math.max(last, revealedAt(cut));
     const text = word.t ?? word.w ?? '';
     if (since >= minSec && (SENTENCE_END.test(text) || (since >= maxSec && PUNCT.test(text)))) {
       shots.push({ at: Number(cut.toFixed(3)), preset: cycle[shots.length % cycle.length], drift: 'none' });
