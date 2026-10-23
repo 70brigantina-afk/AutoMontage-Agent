@@ -40,13 +40,16 @@ export default function buildPlan({ words, face, fps, width, height, durationInF
   if (hasStock) {
     inserts.push({ id: 'stock-1', kind: 'stock', from: stockAt, to: stockAt + 2, src: 'stock/placeholder.mp4', sfx: pickSound(sfxLibrary, 'whoosh') });
   }
+  const blurs = [{ from: shotAt, to: shotUntil - 0.2, px: 20 }];
+  // hidden – где спикера не видно: горизонталь отсчитывает план от его выхода из-под вставки (G17).
+  const hidden = [...blurs, ...inserts].map(({ from, to }) => ({ from, to }));
   return {
     hook: 'speaker',
     camera: {
       face,
-      shots: autoShots(words, { endSec: duration }),
+      shots: autoShots(words, { endSec: duration, aspect: width > height ? 'horizontal' : 'vertical', hidden }),
       punches: [],
-      blurs: [{ from: shotAt, to: shotUntil - 0.2, px: 20 }],
+      blurs,
     },
     items: [
       ...(title ? [{ id: 'title', kind: 'text', at: 0.2, until: Math.min(2.4, shotAt), box: centered(780 * k, top, 220 * k),

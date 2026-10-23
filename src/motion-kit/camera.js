@@ -274,13 +274,59 @@ function planAt(track, frame) {
 }
 
 const PUNCT = /[.,!?…:;]$/u;
+const SENTENCE_END = /[.!?…]$/u;
 
 // Раскадровка по словам: план не длиннее maxSec, режем по концу слова (по возможности на знаке
 // препинания). Молчание без подходящего слова – долгое начало до первой реплики, пауза внутри
 // речи, хвост после последнего слова – режем поровну на куски ≤ maxSec, чтобы не оставить план
 // длиннее лимита. Рядом с самым концом (ближе minSec к endSec) разрез не ставим, чтобы не оставить
 // вспышку короче minSec в последних кадрах.
-export function autoShots(words, { endSec, maxSec = 2.2, minSec = 1.2, cycle = ['W', 'M', 'W', 'L', 'W', 'R'] } = {}) {
+// Горизонталь (aspect: 'horizontal') – длинный ролик 16:9: лицо не должно мелькать, ритм держит
+// графика, а не камера. Поэтому отдельный спокойный режим calmShots: только общий и крупный план.
+export const CALM_SHOTS = Object.freeze({ minSec: 8, maxSec: 16, cycle: Object.freeze(['W', 'M']) });
+
+export function autoShots(words, { endSec, aspect, ...options } = {}) {
+  if (aspect === 'horizontal') return calmShots(words, { endSec, ...options });
+  if (aspect !== undefined && aspect !== 'vertical' && aspect !== 'source') {
+    throw new Error(`autoShots: неизвестный aspect «${aspect}» – используй vertical или horizontal`);
+  }
+  return rhythmShots(words, { endSec, ...options });
+}
+
+// Спокойная раскадровка горизонтали: план не короче minSec, смена – только на конце предложения
+// (. ! ? …), после maxSec – на любом знаке препинания. Молчание не дробим: пауза на одном плане
+// лучше лишней смены крупности. Сдвигов L/R нет – говорящий не прыгает по горизонтали.
+// hidden – окна в секундах ({ from, to }), где спикера не видно: полноэкранные вставки и размытие.
+// Видимый план считается от выхода спикера из-под окна, иначе смена через 0,3 с после вставки
+// мелькает (G17), хотя от прошлой смены прошло больше minSec.
+export function calmShots(words, { endSec, minSec = CALM_SHOTS.minSec, maxSec = CALM_SHOTS.maxSec, cycle = CALM_SHOTS.cycle, hidden = [] } = {}) {
+  if (!(minSec > 0) || !(maxSec >= minSec) || !Array.isArray(cycle) || !cycle.length) {
+    throw new Error('calmShots: нужны minSec > 0, maxSec ≥ minSec и непустой cycle');
+  }
+  if (!Array.isArray(words)) throw new Error('calmShots: words должен быть массивом слов транскрипта');
+  if (!Array.isArray(hidden) || hidden.some((h) => !Number.isFinite(h?.from) || !Number.isFinite(h?.to))) {
+    throw new Error('calmShots: hidden – массив окон { from, to } в секундах');
+  }
+  const list = words.filter((w) => Number.isFinite(w?.e));
+  const end = Number.isFinite(endSec) ? endSec : (list.at(-1)?.e ?? 0);
+  // Последний выход спикера из-под окна не позже t; смена внутри окна не видна – отсчёт не сбивает.
+  const revealedAt = (t) => hidden.reduce((at, h) => (h.to <= t && h.to > at ? h.to : at), 0);
+  const shots = [{ at: 0, preset: cycle[0], drift: 'none' }];
+  let last = 0;
+  for (const word of list) {
+    const cut = word.e;
+    if (end - cut < minSec) break; // хвост короче minSec не отрезаем
+    const since = cut - Math.max(last, revealedAt(cut));
+    const text = word.t ?? word.w ?? '';
+    if (since >= minSec && (SENTENCE_END.test(text) || (since >= maxSec && PUNCT.test(text)))) {
+      shots.push({ at: Number(cut.toFixed(3)), preset: cycle[shots.length % cycle.length], drift: 'none' });
+      last = cut;
+    }
+  }
+  return shots;
+}
+
+function rhythmShots(words, { endSec, maxSec = 2.2, minSec = 1.2, cycle = ['W', 'M', 'W', 'L', 'W', 'R'] } = {}) {
   // Проверяем ДО цикла split(): maxSec ≤ 0 делает шаг деления на ноль и зацикливает split()
   // навсегда, а не просто выдаёт плохой результат – поэтому это исключение, а не тихий дефолт.
   if (!(maxSec > 0) || !(minSec >= 0) || minSec > maxSec || !Array.isArray(cycle) || !cycle.length) {

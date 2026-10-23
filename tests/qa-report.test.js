@@ -13,7 +13,7 @@ test('profiles keep ordered voice-music corridors and share the rhythm rule', ()
     assert.deepEqual(getProfile(name).rhythm, { stopSec: 2.5, warnSec: 2.2 });
   }
   assert.throws(() => getProfile('tiktok'), /неизвестный профиль проверок «tiktok»/);
-  assert.deepEqual([...WAIVABLE], ['G1', 'G4', 'G11']);
+  assert.deepEqual([...WAIVABLE], ['G1', 'G4', 'G11', 'G17']);
 });
 
 // Гейт получает профиль по общей ссылке (несколько гейтов одной проверки, один и тот же объект):

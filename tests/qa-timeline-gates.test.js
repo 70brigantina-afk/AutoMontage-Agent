@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { getProfile } = require('../scripts/qa/profiles');
-const { assertCameraArrays, assertCues, assertInserts, detectCameraEvents, gateDonor, gateHook, gateRhythm, gateSafeZone, gateScale, gateSfxDensity, gateStock, gateWeakCuts, runTimelineGates, speakerPlans } = require('../scripts/qa/timeline-gates');
+const { assertCameraArrays, assertCues, assertInserts, detectCameraEvents, gateCalmCamera, gateDonor, gateHook, gateRhythm, gateSafeZone, gateScale, gateSfxDensity, gateStock, gateWeakCuts, runTimelineGates, speakerPlans } = require('../scripts/qa/timeline-gates');
 const { cutsEvery, manifestFixture } = require('./helpers/manifest-fixtures');
 
 const avatar = getProfile('avatar');
@@ -1801,10 +1801,10 @@ test('gateSfxDensity validates cues itself, even called directly outside runTime
 
 // --- runTimelineGates: весь манифест одним прогоном, порядок гейтов и исключения ---
 
-test('runTimelineGates returns G1–G5, G9–G11, G16 in order and applies waivers', () => {
+test('runTimelineGates returns G1–G5, G9–G11, G16, G17 in order and applies waivers', () => {
   const m = manifestFixture({ camera: (f) => ({ s: f < 125 ? 1 : 1.18 }), waivers: [{ gate: 'G1', reason: 'длинная пауза по правке владельца' }] });
   const gates = runTimelineGates(m, avatar);
-  assert.deepEqual(gates.map((g) => g.id), ['G1', 'G2', 'G3', 'G4', 'G5', 'G9', 'G10', 'G11', 'G16']);
+  assert.deepEqual(gates.map((g) => g.id), ['G1', 'G2', 'G3', 'G4', 'G5', 'G9', 'G10', 'G11', 'G16', 'G17']);
   assert.equal(gates[0].status, 'waived');
 });
 
@@ -1847,4 +1847,63 @@ test('runTimelineGates throws the same "манифест повреждён" err
   const badInserts = manifestFixture({});
   badInserts.inserts = null;
   assert.throws(() => runTimelineGates(badInserts, avatar), /манифест повреждён: inserts должен быть массивом/);
+});
+
+// --- Горизонталь: лицо не мелькает (G17), G1 не требует смены каждые 2,5 с ---
+
+const horizontal = (opts) => manifestFixture({ width: 1920, height: 1080, ...opts });
+
+test('horizontal: a cut every 2 s stops G17, the same camera passes G17 on vertical as skipped', () => {
+  const g = gateCalmCamera(horizontal({ camera: cutsEvery(2) }), avatar);
+  assert.equal(g.status, 'fail');
+  assert.ok(g.spans.length > 0);
+  assert.equal(gateCalmCamera(manifestFixture({ camera: cutsEvery(2) }), avatar).status, 'skipped');
+});
+
+test('horizontal: a lateral jump of the face counts as a camera change for G17', () => {
+  const shift = horizontal({ seconds: 12, camera: (f) => ({ s: 1, dx: f >= 75 ? 170 : 0 }) });
+  assert.equal(gateCalmCamera(shift, avatar).status, 'fail');
+});
+
+test('horizontal: a cut every 10 s passes G17, and a 20 s plan does not stop G1', () => {
+  const calm = horizontal({ seconds: 40, camera: cutsEvery(10) });
+  assert.equal(gateCalmCamera(calm, avatar).status, 'pass');
+  assert.equal(gateRhythm(horizontal({ seconds: 20 }), avatar).status, 'pass');
+  assert.equal(gateRhythm(horizontal({ seconds: 40 }), avatar).status, 'warn');
+  assert.equal(gateRhythm(manifestFixture({ seconds: 20 }), avatar).status, 'fail', 'вертикаль не меняется');
+});
+
+test('horizontal: graphics under blur and inserts do not limit G17 – the speaker plan restarts after them', () => {
+  // Смена крупности спрятана под размытием графики (спикер выходит из-под неё уже крупным) – лицо
+  // не мелькает, даже если до графики спикер был виден всего 2 с.
+  const hidden = horizontal({ seconds: 20, camera: (f) => ({ s: f < 125 ? 1 : 1.18, blur: f >= 50 && f < 125 ? 20 : 0 }) });
+  assert.equal(gateCalmCamera(hidden, avatar).status, 'pass');
+  // Смена на виду через 7 с – между стопом 6 с и целью 8 с: предупреждение.
+  assert.equal(gateCalmCamera(horizontal({ seconds: 21, camera: cutsEvery(7) }), avatar).status, 'warn');
+});
+
+test('autoShots aspect horizontal: visible plan counts from the speaker leaving an insert', () => {
+  const words = [];
+  for (let i = 0; i < 120; i += 1) words.push({ t: i % 7 === 6 ? 'конец.' : 'слово', s: i * 0.5, e: i * 0.5 + 0.4 });
+  const hidden = [{ from: 12, to: 20 }, { from: 33, to: 35.5 }];
+  const shots = kit.autoShots(words, { endSec: 60, aspect: 'horizontal', hidden });
+  const visibleFrom = (t) => Math.max(0, ...hidden.filter((h) => h.to <= t).map((h) => h.to));
+  for (let i = 1; i < shots.length; i += 1) {
+    const { at } = shots[i];
+    if (hidden.some((h) => at > h.from && at < h.to)) continue; // смена под вставкой не видна
+    assert.ok(at - Math.max(shots[i - 1].at, visibleFrom(at)) >= 8 - 1e-9, JSON.stringify(shots));
+  }
+  assert.throws(() => kit.autoShots(words, { endSec: 60, aspect: 'horizontal', hidden: [{ from: 1 }] }), /hidden/);
+});
+
+test('autoShots aspect horizontal: only W/M, every plan ≥ 8 s, cuts on sentence ends', () => {
+  const words = [];
+  for (let i = 0; i < 120; i += 1) words.push({ t: i % 7 === 6 ? 'конец.' : 'слово', s: i * 0.5, e: i * 0.5 + 0.4 });
+  const shots = kit.autoShots(words, { endSec: 60, aspect: 'horizontal' });
+  assert.ok(shots.length >= 3, JSON.stringify(shots));
+  assert.ok(shots.every((s) => s.preset === 'W' || s.preset === 'M'));
+  for (let i = 1; i < shots.length; i += 1) assert.ok(shots[i].at - shots[i - 1].at >= 8 - 1e-9, JSON.stringify(shots));
+  assert.ok(60 - shots.at(-1).at >= 8);
+  assert.throws(() => kit.autoShots(words, { aspect: 'square' }), /aspect/);
+  assert.equal(JSON.stringify(kit.autoShots(words, { endSec: 60 })), JSON.stringify(kit.autoShots(words, { endSec: 60, aspect: 'vertical' })));
 });

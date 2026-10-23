@@ -11,7 +11,7 @@ const ITEM_KINDS = ['text', 'card', 'media'];
 // tests/motion-kit-compile.test.js. Не импортируем profiles.js напрямую: kit – ESM-слой, который
 // грузят и Remotion, и Node-манифест без CLI-инструментов гейтов, а profiles.js – CommonJS-часть
 // именно гейтовой обвязки, заводить между ними прямую зависимость незачем.
-export const WAIVABLE_GATES = Object.freeze(['G1', 'G4', 'G11']);
+export const WAIVABLE_GATES = Object.freeze(['G1', 'G4', 'G11', 'G17']);
 
 // Автор плана – не гейт, а человек: битый waiver (не тот gate, пустая причина, объект вместо
 // массива) должен упасть сразу на layer check понятной русской строкой, а не тихо остаться
