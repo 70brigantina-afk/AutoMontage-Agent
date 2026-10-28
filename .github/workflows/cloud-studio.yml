@@ -1,0 +1,55 @@
+name: Cloud video studio (three modes)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'script = text cards, video = edit source, photos = photo advertisement'
+        required: true
+        type: choice
+        options: [script, video, photos]
+      title:
+        description: 'Video title'
+        required: false
+        default: 'Мой ролик'
+      aspect:
+        description: 'Output format'
+        type: choice
+        options: [vertical, horizontal]
+        default: vertical
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg espeak-ng fonts-dejavu-core fonts-liberation
+          python -m pip install --disable-pip-version-check pillow
+          npm ci --no-audit --no-fund
+      - name: Render selected mode
+        env:
+          VIDEO_MODE: ${{ inputs.mode }}
+          VIDEO_TITLE: ${{ inputs.title }}
+          VIDEO_ASPECT: ${{ inputs.aspect }}
+        run: python scripts/cloud-studio.py
+      - name: Upload MP4
+        uses: actions/upload-artifact@v4
+        with:
+          name: ready-video-${{ inputs.mode }}
+          path: out/cloud-video.mp4
+          if-no-files-found: error
+          retention-days: 7
