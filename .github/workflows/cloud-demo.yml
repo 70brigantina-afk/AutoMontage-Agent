@@ -1,0 +1,38 @@
+name: Cloud demo montage
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render-demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+      - name: Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install FFmpeg and fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-liberation
+      - name: Install JavaScript dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Generate neutral demo assets
+        run: npm run generate:fixtures
+      - name: Render demo video
+        run: npm run demo
+      - name: Upload demo MP4
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: automontage-demo-video
+          path: out/demo.mp4
+          if-no-files-found: error
+          retention-days: 7
